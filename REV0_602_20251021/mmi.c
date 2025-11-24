@@ -1,0 +1,1212 @@
+/*
+*******************************************************************************
+* COPYRIGHT (c) 1992-2012 GASTRON Co.,Ltd. All rights reserved.
+*******************************************************************************
+* Model Name	: GTF-1100 Series
+* Module name	: 
+* Description	: 
+* Version		: REV 0.51
+* Start Date	: 2017.01.17
+* Modify Date	: 2018.06.14
+* C-Compiler	: avr-gcc
+* MPU			: ATmega1281
+* Written by	: Min-Sung, Kang (mskang@gastron.com)
+*******************************************************************************
+*/
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <avr/pgmspace.h>
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include "sw_lib.h"
+
+#include "global.h"
+#include "dbg_printf.h"
+#include "mmi.h"
+#include "gpio.h"
+#include "timer.h"
+#include "main.h"
+#include "ir.h"
+#include "uv.h"
+#include "adc.h"
+#include "modbus.h"
+#include "dac7571.h"
+#include "eep.h"
+#include "uart1281.h"
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+MMI_MODE				mmi_mode;
+FLAME_HandleTypeDef		Flame[FLAME_BUFF_SIZE];
+U8						FlameBufIndex;
+U8						DeviceType, FlameType, DetDistance, LogMode, AlarmState;
+U8						AlarmLatch, FlameLatch, AlarmRelayMode, TroubleRelayMode;
+U8						WarmUpTime;
+U16						FlameCnt;
+U8						FlameRawFifoHp, FlameRawFifoTp;
+U16						BIT_Period, BIT_Runtime, BIT_Fault_Cnt, BIT_Retry_Lmt;
+U16						BIT_Retry_Cnt, BIT_Event_Cnt, PWR_Event_Cnt, BIT_Event_UvFinishTime;
+U8						BITsBuff, BITsTick, BIT_Status, BIT_Mode, BIT_UvFinishFlag, BIT_Log_Flag;
+U8						System_Fault_Flag, Power_Fault_Cnt, Flame_Log_Flag;
+U16						IrScopeModeFifo[IR_WL_MAX][32], UvScopeModeFifo[32];
+U8						ScopeModeFifoHp, ScopeModeFifoTp;
+
+U8 FlameDetDelay_Sec;	// jmyoo  
+U16 AlramCnt = 0;		// jmyoo
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//void Initialize_System( void );
+//void Flame_Detection_Handler( void );
+void Alarm_Decision( FLAME_HandleTypeDef *flame );
+void Alarm_Output_Set( FLAME_HandleTypeDef *flame );
+//void LED_Indicator( void );
+//void BIT_Start( void );
+//void BIT_Drive( void );
+void Flame_Detection_Log( FLAME_HandleTypeDef *flame );
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Initialize_System( void )
+{
+	U16		i, cnt;
+	U8		dat, buf, cop, dst;
+	
+	for( i=0, cnt=0, buf=0xFF; i<0xFFFF; i++ ){
+		
+		Delay_ms( 1 );
+		
+		dat = ( PINC >> 5 & 7 ) | ( PINB >> 4 & 8 );
+		cop = dat ^ buf;
+		
+		if( cop ){
+			cnt = 0;
+		}
+		else {
+			cnt++;
+			if( cnt == 50 ){
+				DeviceType = dat >> 3 & 1;
+				AlarmLatch = dat >> 2 & 1;
+				dst = dat >> 1 & 1;
+				if( dat & 1 ){
+					Modbus_Baud = 9600L;
+				}
+				else {
+					Modbus_Baud = 57600L;
+				}
+				if( DeviceType == DTYPE_UVIR ){
+					if( dst ){
+						DetDistance = DET_DISTANCE_36M;
+					}
+					else {
+						DetDistance = DET_DISTANCE_18M;
+					}
+				}
+				else {
+					if( dst ){
+						DetDistance = DET_DISTANCE_60M;
+					}
+					else {
+						DetDistance = DET_DISTANCE_60M;//DET_DISTANCE_48M;
+					}
+				}
+				break;
+			}
+		}
+		buf = dat;
+	}
+	
+	mmi_mode = FMODE_WARM_UP;
+	
+	//	jmyoo
+	FlameDetDelay_Sec = epr_sm[EEP_FLAME_DETECTION_DELAY_TIME];
+	
+	FlameBufIndex = 0;
+	LogMode = epr_sm[EEP_LOG_MODE];
+	FlameType = epr_sm[EEP_FLAME_TYPE];
+	AlarmState = 0;
+	FlameLatch = 0;
+	AlarmRelayMode = epr_sm[EEP_ALM_RLY_OPERATION];
+	TroubleRelayMode = epr_sm[EEP_TRB_RLY_OPERATION];
+	Trouble_Relay_On();
+	WarmUpTime = WARM_UP_TIME;
+	
+	Flame[0].IrFtFlag = 0xFF;
+	Flame[1].IrFtFlag = 0xFF;
+	Flame[2].IrFtFlag = 0xFF;
+	Flame[0].UvFtFlag = 0xFF;
+	Flame[1].UvFtFlag = 0xFF;
+	Flame[2].UvFtFlag = 0xFF;
+	
+	FlameCnt = 0;
+	FlameRawFifoHp = 0;
+	FlameRawFifoTp = 0;
+	
+	BIT_Period = epr_sm[EEP_BIT_PERIOD];
+	BIT_Runtime = 0;
+	BIT_Fault_Cnt = 0;
+	BIT_Retry_Lmt = epr_sm[EEP_BIT_RETRY_LMT];
+	BIT_Retry_Cnt = epr_sm[EEP_EVT_BIT_RETRY_CNT];
+	BIT_Event_Cnt = epr_sm[EEP_EVT_BIT_FAULT_CNT];
+	PWR_Event_Cnt = epr_sm[EEP_EVT_PWR_FAULT_CNT];
+	BIT_Event_UvFinishTime = epr_sm[EEP_UV_BIT_FINISH_TIME];
+	BITsBuff = 0;
+	BITsTick = 51;
+	BIT_Status = BIT_STATE_IDLE;
+	BIT_Mode = epr_sm[EEP_BIT_MODE];
+	BIT_UvFinishFlag = 0;
+	BIT_Log_Flag = 0;
+	
+	System_Fault_Flag = 0;
+	Power_Fault_Cnt = 0;
+	Flame_Log_Flag = 0;
+	
+	if( DeviceType == DTYPE_UVIR ){
+		DDRF = 0x30;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void LOG_Handler( FLAME_HandleTypeDef *f, U16 *pIrBuf, U16 *pUvBuf )
+{
+	FLAME_HandleTypeDef		*fp[3];
+	U16						i, Cps;
+	
+	switch( LogMode ){
+		case LMODE_RAW:
+			printf( "," );
+			if( DeviceType == DTYPE_TRIPLE ){
+				//printf( "," );
+				for( i=0; i<IR_BUF_SIZE*IR_WL_MAX; i++ ){
+					printf ("%5.3f,", (double)(*(pIrBuf+i)*ADC_LSB) );
+					//printf("%4u, %4u, %4u\n", *(pIrBuf+i), *(pIrBuf+i+IR_BUF_SIZE), *(pIrBuf+i+IR_BUF_SIZE*2) );
+				}
+				printf( "\n" );
+			}
+			else {
+				for( i=0; i<IR_BUF_SIZE+UV_BUF_SIZE; i++ ){
+					if( i<IR_BUF_SIZE ){
+						printf( "%5.3f,", (double)(*(pIrBuf+i)*ADC_LSB) );
+						//printf( "%5.3f,", (double)((i+Modbus_Addr+FlameRawFifoTp)*0.001) );
+					}
+					else {
+						printf( "%3u,", *(pUvBuf+(i-IR_BUF_SIZE)) );
+						//printf( "%3u,", i+Modbus_Addr+FlameRawFifoTp-IR_BUF_SIZE );
+					}
+				}
+				printf( "\n" );
+			}
+			break;
+			
+		case LMODE_CALCULATED:
+			if( f == &Flame[0] ){
+				fp[0] = &Flame[1];
+				fp[1] = &Flame[2];
+				fp[2] = &Flame[0];
+			}
+			else if( f == &Flame[1] ){
+				fp[0] = &Flame[2];
+				fp[1] = &Flame[0];
+				fp[2] = &Flame[1];
+			}
+			else {
+				fp[0] = &Flame[0];
+				fp[1] = &Flame[1];
+				fp[2] = &Flame[2];
+			}
+			printf( "," );
+			if( DeviceType == DTYPE_UVIR ){
+				if( FlameType == NON_HYDROCARBON){
+					printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrLoFreq[IR_WL_430], f->IrLoTime[IR_WL_430], f->IrLoPeak[IR_WL_430], f->IrLoAvrg[IR_WL_430] );
+					printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrHiFreq[IR_WL_430], f->IrHiTime[IR_WL_430], f->IrHiPeak[IR_WL_430], f->IrHiAvrg[IR_WL_430] );
+					printf( "%3u,%2d,%3d, ", f->IrWidestTimeSum[IR_WL_430], f->IrFreqDv[IR_WL_430], f->IrTimeDv[IR_WL_430] );
+					printf( "%3u,%3u,%3u, ", f->IrDirCntSum[IR_WL_430], f->IrFreqDirCntSum[IR_WL_430], f->IrTimeDvSum[IR_WL_430] );
+					printf( "%5.3f,%5.3f,%5.3f,%4u, ", f->Ir1sAvrg[IR_WL_430], f->Ir1sPtoP[IR_WL_430], f->IrAvPtoP[IR_WL_430], f->IrSize[IR_WL_430] );
+					printf( "%5.3f, %5.3f, ", f->IrSizeDvPer[IR_WL_430], f->IrPtoPDvPer[IR_WL_430] );
+				}
+				else {
+					printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrLoFreq[IR_WL_430], f->IrLoTime[IR_WL_430], f->IrLoPeak[IR_WL_430], f->IrLoAvrg[IR_WL_430] );
+					printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrHiFreq[IR_WL_430], f->IrHiTime[IR_WL_430], f->IrHiPeak[IR_WL_430], f->IrHiAvrg[IR_WL_430] );
+					printf( "%2d,%3d, ", f->IrFreqDv[IR_WL_430], f->IrTimeDv[IR_WL_430] );
+					printf( "%5.3f,%5.3f,%5.3f,%4u, ", f->Ir1sAvrg[IR_WL_430], f->Ir1sPtoP[IR_WL_430], f->IrAvPtoP[IR_WL_430], f->IrSize[IR_WL_430] );
+					Cps = f->UvCpsRes;
+					if( Cps > IrFlickerCpsRefLmt ){
+						Cps = IrFlickerCpsRefLmt;
+					}
+					printf( " %5.3f,%5.3f,%5.3f, ", f->Ir1sAvrgDv[IR_WL_430], f->IrAvPtoPDv[IR_WL_430], (double)Cps * IrFlickerFactor );
+				}
+				printf( " %2u,%2u,%2u,%2u,%2u,", f->UvZrCnt, f->UvDvCnt, f->UvZrCntDv, f->UvDvCntDv, f->UvRawMax );
+				printf( "%4u,%6.1f,%6.1f,%3u,%6lu, ", f->UvCpsRaw, f->UvCpsRes, f->UvCpsItg, f->UvCpsRoc, f->UvCpmRaw );
+				printf( "I%02X,U%02X, ", f->IrFtFlag, f->UvFtFlag );
+				printf( "%4.1f,%5.1f,%5.1f, ", P24, PUV, Tempareture );
+				printf( "%3u,%3u,%3u,%3u", IrDetCnt, UvDetCnt, FlameCnt, AlramCnt );
+			}
+			else {
+				printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrLoFreq[IR_WL_430], f->IrLoTime[IR_WL_430], f->IrLoPeak[IR_WL_430], f->IrLoAvrg[IR_WL_430] );
+				printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrHiFreq[IR_WL_430], f->IrHiTime[IR_WL_430], f->IrHiPeak[IR_WL_430], f->IrHiAvrg[IR_WL_430] );
+				printf( "%5.3f,%5.3f,%4u,%3u, ", f->Ir1sAvrg[IR_WL_430], f->IrAvPtoP[IR_WL_430], f->IrSize[IR_WL_430], f->IrSizeRoc[IR_WL_430] );
+				
+				printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrLoFreq[IR_WL_395], f->IrLoTime[IR_WL_395], f->IrLoPeak[IR_WL_395], f->IrLoAvrg[IR_WL_395] );
+				printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrHiFreq[IR_WL_395], f->IrHiTime[IR_WL_395], f->IrHiPeak[IR_WL_395], f->IrHiAvrg[IR_WL_395] );
+				printf( "%5.3f,%5.3f,%4u,%3u, ", f->Ir1sAvrg[IR_WL_395], f->IrAvPtoP[IR_WL_395], f->IrSize[IR_WL_395], f->IrSizeRoc[IR_WL_395] );
+				
+				printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrLoFreq[IR_WL_530], f->IrLoTime[IR_WL_530], f->IrLoPeak[IR_WL_530], f->IrLoAvrg[IR_WL_530] );
+				printf( "%2u,%3u,%5.3f,%5.3f, ", f->IrHiFreq[IR_WL_530], f->IrHiTime[IR_WL_530], f->IrHiPeak[IR_WL_530], f->IrHiAvrg[IR_WL_530] );
+				printf( "%5.3f,%5.3f,%4u,%3u, ", f->Ir1sAvrg[IR_WL_530], f->IrAvPtoP[IR_WL_530], f->IrSize[IR_WL_530], f->IrSizeRoc[IR_WL_530] );
+				
+				printf( "%4.1f,%4.1f,%6.1f,%6.1f, ", f->IrRatioLmt[IR_WL_395], f->IrRatioLmt[IR_WL_530], f->IrRelRatio[IR_WL_395], f->IrRelRatio[IR_WL_530] );
+				
+				printf( "I%02X, %4.1f,%5.1f, ", f->IrFtFlag, P24, Tempareture );
+				printf( "%3u,%3u,%3u", IrWarCnt, FlameCnt, AlramCnt );
+				
+				//printf( "\n, %5u,%5u,%5u,%5u,%5u,%5u,", IrLoDriftChkTick[IR_WL_430], IrLoDriftChkTick[IR_WL_395], IrLoDriftChkTick[IR_WL_530], IrHiDriftChkTick[IR_WL_430], IrHiDriftChkTick[IR_WL_395], IrHiDriftChkTick[IR_WL_530] );
+			}
+			if( BIT_Log_Flag ){
+				BIT_Log_Flag = 0;
+				
+				printf( ", B" );
+			}
+			printf( "\n");
+			break;
+			
+		case LMODE_UV_ONLY:
+			printf( "%4u,%6.1f,%6.1f\n", f->UvCpsRaw, f->UvCpsItg, f->UvCpsRes );
+			break;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void ScopeMode_Log_Handler( void )
+{
+	U8		bHp, bTp;
+	
+	if( LogMode == LMODE_SCOPE ){
+		
+		bHp = ScopeModeFifoHp & 31;
+		bTp = ScopeModeFifoTp & 31;
+		
+		if( bHp != bTp ){
+			if( DeviceType == DTYPE_TRIPLE ){
+    	      	    printf("%5.3f,%5.3f,%5.3f\r", (double)(IrScopeModeFifo[IR_WL_430][bTp]*ADC_LSB), (double)(IrScopeModeFifo[IR_WL_395][bTp]*ADC_LSB), (double)(IrScopeModeFifo[IR_WL_530][bTp]*ADC_LSB) );
+			}
+			else {
+				printf( "%5.3f,%3u\r", (double)(IrScopeModeFifo[IR_WL_430][bTp]*ADC_LSB), UvScopeModeFifo[bTp] );
+			}
+			
+			ScopeModeFifoTp++;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Flame_Detection_Handler( void )
+{
+	FLAME_HandleTypeDef		*f;
+	U8						n;
+	U16						*pIrBuf, *pUvBuf;
+	U8						bHp, bTp;
+	
+	bHp = FlameRawFifoHp & 1;
+	bTp = FlameRawFifoTp & 1;
+	
+	if( bHp != bTp ){
+		
+		pIrBuf = &IrRaw[bTp][0][0];
+		pUvBuf = &UvRaw[bTp][0];
+		n = FlameBufIndex;
+		f = &Flame[n];
+		
+		if( DeviceType == DTYPE_UVIR ){
+			IR_Calculation( pIrBuf, f );
+			UV_Calculation( pUvBuf, f );
+			IR_Detection( n );
+			UV_Detection( n );
+		}
+		else {
+			//ADC_TP_H();
+			IR_Calculation( pIrBuf, f );
+			//ADC_TP_L();
+			IR_Detection( n );
+		}
+		
+		Alarm_Decision( f );
+		
+		Alarm_Output_Set( f );
+		FlameData_Mapping( f );
+		
+		LOG_Handler( f, pIrBuf, pUvBuf );
+		
+		FlameBufIndex = (FlameBufIndex+1) % FLAME_BUFF_SIZE;
+		FlameRawFifoTp++;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Alarm_Decision( FLAME_HandleTypeDef *flame )
+{
+	FLAME_HandleTypeDef *fp[3];
+	U8		bFlag = ALARM_STATE_NO;
+	S16		MinBIT;
+	
+	// jmyoo 
+	U8 Local_AlarmState = 0;  	
+	
+	if( flame == &Flame[0] ){
+		fp[0] = &Flame[1];
+		fp[1] = &Flame[2];
+		fp[2] = &Flame[0];
+	}
+	else if( flame == &Flame[1] ){
+		fp[0] = &Flame[2];
+		fp[1] = &Flame[0];
+		fp[2] = &Flame[1];
+	}
+	else {
+		fp[0] = &Flame[0];
+		fp[1] = &Flame[1];
+		fp[2] = &Flame[2];
+	}
+	
+	if( mmi_mode != FMODE_WARM_UP ){
+		switch( fp[2]->IrCnt ){ // IR Decision
+			case 1:
+				if( DeviceType == DTYPE_UVIR ){
+					bFlag |= IR_WAR_BIT;
+				}
+				break;
+				
+			case 2:
+				if( DeviceType == DTYPE_UVIR ){
+					if( fp[1]->IrFtFlag ){
+						bFlag |= IR_WAR_BIT;
+					}
+					else if(( fp[2]->IrFtFlag == 0 ) && ( fp[1]->IrFtFlag == 0 )){
+						bFlag |= IR_DET_BIT;
+					}
+				}
+				else {
+					if( fp[1]->IrCnt < 3 ){
+						bFlag |= ( IR_WAR_BIT | UV_WAR_BIT );
+					}
+				}
+				break;
+				
+			case 3:
+				bFlag |= IR_DET_BIT;
+				if( DeviceType == DTYPE_TRIPLE ){
+					bFlag |= UV_DET_BIT;
+				}
+				break;
+		}
+		if( DeviceType == DTYPE_UVIR ){
+			switch( fp[2]->UvCnt ){ // UV Decision
+				case 2:
+					if( fp[1]->UvCnt < 3 ){
+						bFlag |= UV_WAR_BIT;
+					}
+					break;
+					
+				case 3:
+					bFlag |= UV_DET_BIT;
+					break;
+			}
+		}
+		
+		if( fp[2]->IrFtFlag == 0 ){
+			if( IrWarCnt < DETECTION_CNT_MAX ){
+				IrWarCnt++;
+			}
+		}
+		if( bFlag & IR_DET_BIT ){
+			if( IrDetCnt < DETECTION_CNT_MAX ){
+				IrDetCnt++;
+			}
+		}
+		
+		if( fp[2]->UvFtFlag == 0 ){
+			if( UvWarCnt < DETECTION_CNT_MAX ){
+				UvWarCnt++;
+			}
+		}
+		if( DeviceType == DTYPE_UVIR ){
+			if( bFlag & UV_DET_BIT ){
+				if( UvDetCnt < DETECTION_CNT_MAX ){
+					UvDetCnt++;
+				}
+			}
+		}
+		
+		if( bFlag == ( IR_DET_BIT | UV_DET_BIT )){
+			Local_AlarmState = ALARM_STATE_FLAME;
+						
+			if( FlameCnt < DETECTION_CNT_MAX ){
+				FlameCnt++;
+			}
+			
+			if( FlameDetDelay_Sec == 0 ){
+				if( AlramCnt < DETECTION_CNT_MAX ){
+					AlramCnt++;
+				}
+			}
+		}
+		
+		if( !FlameLatch ){
+			if( EepErrorFlag ){
+				bFlag |= EEP_FAULT_BIT;
+			}
+			if(( P24 < 17.f ) || ( P24 > 33.f )){
+				if( Power_Fault_Cnt < 0xFF ){
+					Power_Fault_Cnt++;
+				}
+				if( Power_Fault_Cnt == 5 ){
+					if( PWR_Event_Cnt < pgm_read_word( &EEP_SYS_UP_LIMIT[EEP_EVT_PWR_FAULT_CNT] )){
+						PWR_Event_Cnt++;
+						
+						EEP_Sys_Wr( EEP_EVT_PWR_FAULT_CNT, PWR_Event_Cnt );
+					}
+					System_Fault_Flag |= BIT0;
+				}
+			}
+			else {
+				Power_Fault_Cnt = 0;
+				System_Fault_Flag &= ~BIT0;
+			}
+			if( System_Fault_Flag & BIT0 ){
+				bFlag |= PWR_FAULT_BIT;
+			}
+			if( BIT_Status == BIT_STATE_DECISION ){
+				if( DeviceType == DTYPE_TRIPLE ){
+					if( fp[0]->Ir1sPtoP[IR_WL_430] < IrBitLmt ){
+						System_Fault_Flag |=  BIT1;
+					}
+					else {
+						System_Fault_Flag &= ~BIT1;
+					}
+					if(( fp[0]->Ir1sPtoP[IR_WL_395] < IrBitLmt ) || ( fp[0]->Ir1sPtoP[IR_WL_530] < IrBitLmt )){
+						System_Fault_Flag |=  BIT2;
+					}
+					else {
+						System_Fault_Flag &= ~BIT2;
+					}
+				}
+				else {
+					if( fp[0]->Ir1sPtoP[IR_WL_430] < IrBitLmt ){
+						System_Fault_Flag |=  BIT1;
+					}
+					else {
+						System_Fault_Flag &= ~BIT1;
+					}
+					if((( fp[0]->UvCpsRaw + fp[1]->UvCpsRaw + fp[2]->UvCpsRaw ) < UvBitLmt ) || ( PUV < 300.f )){
+						System_Fault_Flag |=  BIT2;
+					}
+					else {
+						System_Fault_Flag &= ~BIT2;
+					}
+				}
+				
+				if( System_Fault_Flag & ( BIT1 | BIT2 )){
+					if( BIT_Fault_Cnt < BIT_Retry_Lmt ){
+						BIT_Fault_Cnt++;
+						sTimerTick[TMR_BIT_PERIOD] = 0x8000+30;
+						sTimerFlag[TMR_BIT_PERIOD] = BIT_Period-1;
+						if( BIT_Retry_Cnt < pgm_read_word( &EEP_SYS_UP_LIMIT[EEP_EVT_BIT_RETRY_CNT] )){
+							BIT_Retry_Cnt++;
+							
+							EEP_Sys_Wr( EEP_EVT_BIT_RETRY_CNT, BIT_Retry_Cnt );
+						}
+						BIT_Status = BIT_STATE_RETRY;
+					}
+					else {
+						System_Fault_Flag |= BIT3;
+						System_Fault_Flag &= ~( BIT1 | BIT2 );
+						BIT_Fault_Cnt = 0;
+						if( BIT_Event_Cnt < pgm_read_word( &EEP_SYS_UP_LIMIT[EEP_EVT_BIT_FAULT_CNT] )){
+							BIT_Event_Cnt++;
+							
+							EEP_Sys_Wr( EEP_EVT_BIT_FAULT_CNT, BIT_Event_Cnt );
+						}
+						BIT_Status = BIT_STATE_IDLE;
+					}
+				}
+				else {
+					System_Fault_Flag &= ~BIT3;
+					BIT_Fault_Cnt = 0;
+					BIT_Status = BIT_STATE_IDLE;
+				}
+				
+				IrAvPtoPMax = 0;
+				UvSum = 0;
+				
+				MinBIT = (S16)(fp[0]->Ir1sPtoP[IR_WL_430]*1000);
+				if( MinBIT < epr_sm[EEP_EVT_BIT_IR430_1S_PTOP_MIN] ){
+					EEP_Sys_Wr( EEP_EVT_BIT_IR430_1S_PTOP_MIN, MinBIT );
+				}
+				
+				MinBIT = (S16)(fp[0]->Ir1sPtoP[IR_WL_395]*1000);
+				if( MinBIT < epr_sm[EEP_EVT_BIT_IR395_1S_PTOP_MIN] ){
+					EEP_Sys_Wr( EEP_EVT_BIT_IR395_1S_PTOP_MIN, MinBIT );
+				}
+				
+				MinBIT = (S16)(fp[0]->Ir1sPtoP[IR_WL_530]*1000);
+				if( MinBIT < epr_sm[EEP_EVT_BIT_IR530_1S_PTOP_MIN] ){
+					EEP_Sys_Wr( EEP_EVT_BIT_IR530_1S_PTOP_MIN, MinBIT );
+				}
+			}
+			if( System_Fault_Flag & BIT3 ){
+				bFlag |= BIT_FAULT_BIT;
+			}
+			
+			if( AlarmState != ALARM_STATE_BIT_PROGRESS ){
+		
+				if( fp[2]->Ir1sAvrg[IR_WL_430] < ((double)(IrLoLmt + flame->IrLmtOffset[IR_WL_430]) * ADC_LSB) ){
+					if( IrLoDriftChkTick[IR_WL_430] != 0x7FFF ){
+						IrLoDriftChkTick[IR_WL_430]++;
+					}
+				}
+				else {
+					IrLoDriftChkTick[IR_WL_430] = 0;
+				}
+				if( fp[2]->Ir1sAvrg[IR_WL_430] > ((double)(IrHiLmt + flame->IrLmtOffset[IR_WL_430]) * ADC_LSB) ){
+					if( IrHiDriftChkTick[IR_WL_430] != 0x7FFF ){
+						IrHiDriftChkTick[IR_WL_430]++;
+					}
+				}
+				else {
+					IrHiDriftChkTick[IR_WL_430] = 0;
+				}
+				
+				if( DeviceType == DTYPE_TRIPLE ){
+					if( fp[2]->Ir1sAvrg[IR_WL_395] < ((double)IrLoLmt * ADC_LSB) ){
+						if( IrLoDriftChkTick[IR_WL_395] != 0x7FFF ){
+							IrLoDriftChkTick[IR_WL_395]++;
+						}
+					}
+					else {
+						IrLoDriftChkTick[IR_WL_395] = 0;
+					}
+					if( fp[2]->Ir1sAvrg[IR_WL_395] > ((double)IrHiLmt * ADC_LSB) ){
+						if( IrHiDriftChkTick[IR_WL_395] != 0x7FFF ){
+							IrHiDriftChkTick[IR_WL_395]++;
+						}
+					}
+					else {
+						IrHiDriftChkTick[IR_WL_395] = 0;
+					}
+		    	
+					if( fp[2]->Ir1sAvrg[IR_WL_530] < ((double)IrLoLmt * ADC_LSB) ){
+						if( IrLoDriftChkTick[IR_WL_530] != 0x7FFF ){
+							IrLoDriftChkTick[IR_WL_530]++;
+						}
+					}
+					else {
+						IrLoDriftChkTick[IR_WL_530] = 0;
+					}
+					if( fp[2]->Ir1sAvrg[IR_WL_530] > ((double)IrHiLmt * ADC_LSB) ){
+						if( IrHiDriftChkTick[IR_WL_530] != 0x7FFF ){
+							IrHiDriftChkTick[IR_WL_530]++;
+						}
+					}
+					else {
+						IrHiDriftChkTick[IR_WL_530] = 0;
+					}
+				}
+				
+			}
+		
+			if( sTimerFlag[TMR_IR_DRIFT_MAX_CHK] ){
+				sTimerFlag[TMR_IR_DRIFT_MAX_CHK] = 0;
+				
+				if( IrLoDriftChkTick[IR_WL_430] > epr_sm[EEP_EVT_IR430_DRIFT_T_MAX_L] ){
+					EEP_Sys_Wr( EEP_EVT_IR430_DRIFT_T_MAX_L, IrLoDriftChkTick[IR_WL_430] );
+				}
+				else if( IrHiDriftChkTick[IR_WL_430] > epr_sm[EEP_EVT_IR430_DRIFT_T_MAX_H] ){
+					EEP_Sys_Wr( EEP_EVT_IR430_DRIFT_T_MAX_H, IrHiDriftChkTick[IR_WL_430] );
+				}
+				
+				if( IrLoDriftChkTick[IR_WL_395] > epr_sm[EEP_EVT_IR395_DRIFT_T_MAX_L] ){
+					EEP_Sys_Wr( EEP_EVT_IR395_DRIFT_T_MAX_L, IrLoDriftChkTick[IR_WL_395] );
+				}
+				else if( IrHiDriftChkTick[IR_WL_395] > epr_sm[EEP_EVT_IR395_DRIFT_T_MAX_H] ){
+					EEP_Sys_Wr( EEP_EVT_IR395_DRIFT_T_MAX_H, IrHiDriftChkTick[IR_WL_395] );
+				}
+				
+				if( IrLoDriftChkTick[IR_WL_530] > epr_sm[EEP_EVT_IR530_DRIFT_T_MAX_L] ){
+					EEP_Sys_Wr( EEP_EVT_IR530_DRIFT_T_MAX_L, IrLoDriftChkTick[IR_WL_530] );
+				}
+				else if( IrHiDriftChkTick[IR_WL_530] > epr_sm[EEP_EVT_IR530_DRIFT_T_MAX_H] ){
+					EEP_Sys_Wr( EEP_EVT_IR530_DRIFT_T_MAX_H, IrHiDriftChkTick[IR_WL_530] );
+				}
+			}
+			
+			if( ( IrLoDriftChkTick[IR_WL_430] > 3600 ) || ( IrLoDriftChkTick[IR_WL_395] > 3600 ) || ( IrLoDriftChkTick[IR_WL_530] > 3600 ) ||
+				( IrHiDriftChkTick[IR_WL_430] > 3600 ) || ( IrHiDriftChkTick[IR_WL_395] > 3600 ) || ( IrHiDriftChkTick[IR_WL_530] > 3600 ) ){
+					bFlag |= IR_OFFSET_FAULT_BIT;
+			}
+		}
+		
+		if( FlameLatch ){
+			AlarmState = ALARM_STATE_FLAME;			
+			if( AlarmLatch == 0 ){
+				FlameLatch--;
+			}
+		}
+		else {
+			if( bFlag & EEP_FAULT_BIT ){ // EEPROM CRC Fail
+				AlarmState = ALARM_STATE_EEP_FAULT;
+			}
+			else if( bFlag & PWR_FAULT_BIT ){ // Low Power State
+				AlarmState = ALARM_STATE_PWR_FAULT;
+			}
+			else if( bFlag & BIT_FAULT_BIT ){ // BIT fault count exceeded
+				AlarmState = ALARM_STATE_BIT_FAULT;
+			}
+			else if( bFlag & IR_OFFSET_FAULT_BIT ){ // BIT fault count exceeded
+				AlarmState = ALARM_STATE_IR_OFFSET_FAULT;
+			}
+			else {
+				switch( bFlag ){
+					case 0x03: // UV+IR Warning
+					case 0x06: // IR Detection + UV Warning
+					case 0x09: // UV Detection + IR Warning
+						AlarmState = ALARM_STATE_WARNING;
+						break;
+						
+					case 0x04: // IR Detection
+						AlarmState = ALARM_STATE_IR;
+						break;
+						
+					case 0x08: // UV Detection
+						AlarmState = ALARM_STATE_UV;
+						break;
+						
+					case 0x0C: // Flame Detection
+						if( FlameDetDelay_Sec == 0 )
+						{
+							AlarmState = ALARM_STATE_FLAME;
+							FlameLatch = FLAME_STATE_MAINTAIN_TIME;
+						}
+						break;
+						
+					default:
+						if( BIT_Status == BIT_STATE_IDLE ){
+							AlarmState = ALARM_STATE_NO;
+						}
+						else {
+							AlarmState = ALARM_STATE_BIT_PROGRESS;
+						}
+						break;
+				} // end switch
+			} // end else
+		} // end else
+		
+		if( Local_AlarmState == ALARM_STATE_FLAME ){
+			if( FlameDetDelay_Sec > 0 ) FlameDetDelay_Sec--;
+		}
+		else{
+			FlameDetDelay_Sec = epr_sm[EEP_FLAME_DETECTION_DELAY_TIME];
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Alarm_Output_Set( FLAME_HandleTypeDef *flame )
+{
+	if( mmi_mode != FMODE_WARM_UP ){
+		switch( AlarmState ){
+			case ALARM_STATE_BIT_FAULT:
+				Trouble_Relay_On();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 1000 );
+				}
+				break;
+				
+			case ALARM_STATE_EEP_FAULT:
+				Trouble_Relay_On();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 2000 );
+				}
+				break;
+				
+			case ALARM_STATE_IR_OFFSET_FAULT:
+				Trouble_Relay_On();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 3000 );
+				}
+				break;
+				
+			case ALARM_STATE_NO:
+			case ALARM_STATE_BIT_PROGRESS:
+			case ALARM_STATE_IR:
+			case ALARM_STATE_UV:
+			case ALARM_STATE_WARNING:
+				Trouble_Relay_Off();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 4000 );
+				}
+				break;
+#if 0
+			case ALARM_STATE_IR:
+				Trouble_Relay_Off();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 8000 );
+				}
+				break;
+				
+			case ALARM_STATE_UV:
+				Trouble_Relay_Off();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 12000 );
+				}
+				break;
+				
+			case ALARM_STATE_WARNING:
+				Trouble_Relay_Off();
+				MA_OUT_ENA();
+				if( !FlameLatch ){
+					Alarm_Relay_Off();
+					DAC7571_uA_Wr( 16000 );
+				}
+				break;
+#endif
+			case ALARM_STATE_FLAME:
+				Trouble_Relay_Off();
+				MA_OUT_ENA();
+				if( DeviceType == DTYPE_UVIR ){
+					if( UvPwrCtrlFlag && AlarmLatch ){
+						SMPS_OFF();
+					}
+				}
+				Alarm_Relay_On();
+				DAC7571_uA_Wr( 20000 );
+				if( !Flame_Log_Flag ){
+					Flame_Detection_Log( flame );
+					Flame_Log_Flag = 1;
+				}
+				break;
+				
+			case ALARM_STATE_PWR_FAULT:
+				MA_OUT_DIS();
+				Trouble_Relay_On();
+				break;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void LED_Indicator( void )
+{
+	if( mmi_mode == FMODE_WARM_UP ){
+		
+		if( WarmUpTime == 0 ){
+			sTimerTick[TMR_STA_LED_BLINK] = 0x8000+74;
+			sTimerFlag[TMR_STA_LED_BLINK] = 0;
+			sTimerTick[TMR_WAR_LED_BLINK] = 0x8000+4;
+			sTimerFlag[TMR_WAR_LED_BLINK] = 0;
+			sTimerTick[TMR_FLT_LED_BLINK] = 0x8000+49;
+			sTimerFlag[TMR_FLT_LED_BLINK] = 0;
+			IrAvPtoPMax = 0;
+			UvSum = 0;
+			mmi_mode = FMODE_NORMAL;
+		}
+		else {
+			switch(( WarmUpTime / 5 ) & 3 ){
+				case 0:
+					ALM_LED_OFF();
+					RED_LED_OFF();
+					GRN_LED_ON();
+					break;
+					
+				case 1:
+				case 3:
+					ALM_LED_ON();
+					RED_LED_OFF();
+					GRN_LED_OFF();
+					break;
+					
+				case 2:
+					ALM_LED_OFF();
+					RED_LED_ON();
+					GRN_LED_OFF();
+					break;
+			}
+			WarmUpTime--;
+		}
+	}
+	else {
+		switch( AlarmState ){
+			case ALARM_STATE_NO:
+			case ALARM_STATE_BIT_PROGRESS:
+			case ALARM_STATE_IR:
+			case ALARM_STATE_UV:
+				if( sTimerFlag[TMR_STA_LED_BLINK] ){
+					GRN_LED_OFF();
+				}
+				else {
+					GRN_LED_ON();
+				}
+				RED_LED_OFF();
+				if( !FlameLatch ){
+					ALM_LED_OFF();
+				}
+				break;
+				
+			case ALARM_STATE_WARNING:
+				if( sTimerFlag[TMR_STA_LED_BLINK] ){
+					GRN_LED_OFF();
+				}
+				else {
+					GRN_LED_ON();
+				}
+				RED_LED_OFF();
+				if( !FlameLatch ){
+					if( sTimerFlag[TMR_WAR_LED_BLINK] ){
+						ALM_LED_ON();
+					}
+					else {
+						ALM_LED_OFF();
+					}
+				}
+				break;
+				
+			case ALARM_STATE_FLAME:
+				if( sTimerFlag[TMR_STA_LED_BLINK] ){
+					GRN_LED_OFF();
+				}
+				else {
+					GRN_LED_ON();
+				}
+				RED_LED_OFF();
+				ALM_LED_ON();
+				break;
+				
+			case ALARM_STATE_PWR_FAULT:
+			case ALARM_STATE_BIT_FAULT:
+			case ALARM_STATE_EEP_FAULT:
+			case ALARM_STATE_IR_OFFSET_FAULT:
+				if( !FlameLatch ){
+					ALM_LED_OFF();
+				}
+				if( sTimerFlag[TMR_FLT_LED_BLINK] ){
+					sTimerFlag[TMR_FLT_LED_BLINK] = 0;
+					RED_LED_ON();
+					GRN_LED_ON();
+				}
+				else {
+					RED_LED_OFF();
+					GRN_LED_OFF();
+				}
+				break;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void BIT_Start( void )
+{
+	if( !FlameLatch && (( AlarmState == ALARM_STATE_NO ) || ( AlarmState == ALARM_STATE_BIT_PROGRESS ) || ( AlarmState == ALARM_STATE_BIT_FAULT ))){
+		
+		if( sTimerFlag[TMR_BIT_PERIOD] >= BIT_Period ){
+			sTimerFlag[TMR_BIT_PERIOD] = 0;
+			
+			if( DeviceType == DTYPE_UVIR ){
+				WHT_LED_ON();
+				SMPS_ON();
+				TLUV_ON();
+				BIT_UvFinishFlag = 0;
+			}
+			TLIR_ON();
+			BIT_Runtime = 3000;
+			BIT_Status = BIT_STATE_PROGRESS;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void BIT_Drive( void )
+{
+	if( BIT_Runtime ){
+		BIT_Runtime--;
+#if 1
+		if( TCNT1 >= UvBitLmt ){
+			if( BIT_UvFinishFlag == 0 ){
+				BIT_UvFinishFlag =  1;
+				TLUV_OFF();
+				if(( 3000 - BIT_Runtime ) > BIT_Event_UvFinishTime ){
+					BIT_Event_UvFinishTime = 3000 - BIT_Runtime;
+					EEP_Sys_Wr( EEP_UV_BIT_FINISH_TIME, BIT_Event_UvFinishTime );
+				}
+			}
+		}
+#endif
+		switch( BIT_Runtime ){
+			case    0:
+				if( DeviceType == DTYPE_UVIR ){
+					if( UvPwrCtrlFlag ){
+						if( IrNonDetCnt[IR_WL_430] > UV_POWER_RET_TIME ){
+							SMPS_OFF();
+						}
+					}
+					WHT_LED_OFF();
+				}
+				BIT_Status = BIT_STATE_DECISION;
+				break;
+				
+			case   50:
+				if( DeviceType == DTYPE_UVIR ){
+					if( BIT_UvFinishFlag == 0 ){
+						BIT_UvFinishFlag =  1;
+						TLUV_OFF();
+						if( BIT_Event_UvFinishTime < 2950 ){
+							BIT_Event_UvFinishTime = 2950;
+							EEP_Sys_Wr( EEP_UV_BIT_FINISH_TIME, BIT_Event_UvFinishTime );
+						}
+					}
+				}
+				break;
+				
+			case 2000:
+				BIT_Log_Flag = 1;
+				break;
+				
+			case 2920:
+				if( DeviceType == DTYPE_UVIR ){
+					TLIR_OFF();
+				}
+				break;
+				
+			case 2930: 
+				if( DeviceType == DTYPE_TRIPLE ){
+					TLIR_OFF();
+				}
+				break;
+		}
+	}
+	else {
+		if( !TLIR_PORT_CHK() ){
+			TLIR_OFF();
+		}
+		if( !TLUV_PORT_CHK() ){
+			TLUV_OFF();
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void External_BIT_Scan( void )
+{
+	U8		bData, bComp;
+	
+	bData = BIT_PORT_CHK();
+	bComp = BITsBuff ^ bData;
+	
+	if( bComp ){
+		BITsTick = 0;
+	}
+	else {
+		if( BITsTick != 0xFF ){
+			BITsTick++;
+		}
+		if( BITsTick == 50 ){
+			if( !bData ){
+				if( BIT_Mode ){
+					if( mmi_mode != FMODE_WARM_UP ){
+						sTimerFlag[TMR_BIT_PERIOD] = BIT_Period;
+					}
+					DPRINT( " EXT. BIT!\n" );
+				}
+			}
+		}
+	}
+	BITsBuff = bData;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Flame_Detection_Log( FLAME_HandleTypeDef *flame )
+{
+	FLAME_HandleTypeDef		*fi[3];
+	U16						i;
+	
+	if( flame == &Flame[0] ){
+		fi[0] = &Flame[1];
+		fi[1] = &Flame[2];
+		fi[2] = &Flame[0];
+	}
+	else if( flame == &Flame[1] ){
+		fi[0] = &Flame[2];
+		fi[1] = &Flame[0];
+		fi[2] = &Flame[1];
+	}
+	else {
+		fi[0] = &Flame[0];
+		fi[1] = &Flame[1];
+		fi[2] = &Flame[2];
+	}
+	
+	epr_sm[EEP_EVT_IR430_LO_FREQ_BF_3S] = fi[0]->IrLoFreq[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_TIME_BF_3S] = fi[0]->IrLoTime[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_PEAK_BF_3S] = (U16)(fi[0]->IrLoPeak[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_LO_AVRG_BF_3S] = (U16)(fi[0]->IrLoAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_HI_FREQ_BF_3S] = fi[0]->IrHiFreq[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_HI_TIME_BF_3S] = fi[0]->IrHiTime[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_HI_PEAK_BF_3S] = (U16)(fi[0]->IrHiPeak[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_HI_AVRG_BF_3S] = (U16)(fi[0]->IrHiAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_1S_AVRG_BF_3S] = (U16)(fi[0]->Ir1sAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_1S_PTOP_BF_3S] = (U16)(fi[0]->Ir1sPtoP[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_AV_PTOP_BF_3S] = (U16)(fi[0]->IrAvPtoP[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_IR_SIZE_BF_3S] = fi[0]->IrSize[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_FREQ_BF_2S] = fi[1]->IrLoFreq[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_TIME_BF_2S] = fi[1]->IrLoTime[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_PEAK_BF_2S] = (U16)(fi[1]->IrLoPeak[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_LO_AVRG_BF_2S] = (U16)(fi[1]->IrLoAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_HI_FREQ_BF_2S] = fi[1]->IrHiFreq[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_HI_TIME_BF_2S] = fi[1]->IrHiTime[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_HI_PEAK_BF_2S] = (U16)(fi[1]->IrHiPeak[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_HI_AVRG_BF_2S] = (U16)(fi[1]->IrHiAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_1S_AVRG_BF_2S] = (U16)(fi[1]->Ir1sAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_1S_PTOP_BF_2S] = (U16)(fi[1]->Ir1sPtoP[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_AV_PTOP_BF_2S] = (U16)(fi[1]->IrAvPtoP[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_IR_SIZE_BF_2S] = fi[1]->IrSize[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_FREQ_BF_1S] = fi[2]->IrLoFreq[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_TIME_BF_1S] = fi[2]->IrLoTime[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_LO_PEAK_BF_1S] = (U16)(fi[2]->IrLoPeak[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_LO_AVRG_BF_1S] = (U16)(fi[2]->IrLoAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_HI_FREQ_BF_1S] = fi[2]->IrHiFreq[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_HI_TIME_BF_1S] = fi[2]->IrHiTime[IR_WL_430];
+	epr_sm[EEP_EVT_IR430_HI_PEAK_BF_1S] = (U16)(fi[2]->IrHiPeak[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_HI_AVRG_BF_1S] = (U16)(fi[2]->IrHiAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_1S_AVRG_BF_1S] = (U16)(fi[2]->Ir1sAvrg[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_1S_PTOP_BF_1S] = (U16)(fi[2]->Ir1sPtoP[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_AV_PTOP_BF_1S] = (U16)(fi[2]->IrAvPtoP[IR_WL_430]*1000);
+	epr_sm[EEP_EVT_IR430_IR_SIZE_BF_1S] = fi[2]->IrSize[IR_WL_430];
+	
+	for( i=EEP_EVT_IR430_LO_FREQ_BF_3S; i<=EEP_EVT_IR430_IR_SIZE_BF_1S; i++ ){
+		EEP_Wr( i, epr_sm[i] );
+	}
+	
+	if( DeviceType == DTYPE_TRIPLE ){
+		epr_sm[EEP_EVT_IR395_LO_FREQ_BF_3S] = fi[0]->IrLoFreq[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_TIME_BF_3S] = fi[0]->IrLoTime[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_PEAK_BF_3S] = (U16)(fi[0]->IrLoPeak[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_LO_AVRG_BF_3S] = (U16)(fi[0]->IrLoAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_HI_FREQ_BF_3S] = fi[0]->IrHiFreq[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_HI_TIME_BF_3S] = fi[0]->IrHiTime[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_HI_PEAK_BF_3S] = (U16)(fi[0]->IrHiPeak[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_HI_AVRG_BF_3S] = (U16)(fi[0]->IrHiAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_1S_AVRG_BF_3S] = (U16)(fi[0]->Ir1sAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_1S_PTOP_BF_3S] = (U16)(fi[0]->Ir1sPtoP[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_AV_PTOP_BF_3S] = (U16)(fi[0]->IrAvPtoP[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_IR_SIZE_BF_3S] = fi[0]->IrSize[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_FREQ_BF_2S] = fi[1]->IrLoFreq[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_TIME_BF_2S] = fi[1]->IrLoTime[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_PEAK_BF_2S] = (U16)(fi[1]->IrLoPeak[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_LO_AVRG_BF_2S] = (U16)(fi[1]->IrLoAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_HI_FREQ_BF_2S] = fi[1]->IrHiFreq[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_HI_TIME_BF_2S] = fi[1]->IrHiTime[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_HI_PEAK_BF_2S] = (U16)(fi[1]->IrHiPeak[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_HI_AVRG_BF_2S] = (U16)(fi[1]->IrHiAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_1S_AVRG_BF_2S] = (U16)(fi[1]->Ir1sAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_1S_PTOP_BF_2S] = (U16)(fi[1]->Ir1sPtoP[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_AV_PTOP_BF_2S] = (U16)(fi[1]->IrAvPtoP[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_IR_SIZE_BF_2S] = fi[1]->IrSize[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_FREQ_BF_1S] = fi[2]->IrLoFreq[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_TIME_BF_1S] = fi[2]->IrLoTime[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_LO_PEAK_BF_1S] = (U16)(fi[2]->IrLoPeak[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_LO_AVRG_BF_1S] = (U16)(fi[2]->IrLoAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_HI_FREQ_BF_1S] = fi[2]->IrHiFreq[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_HI_TIME_BF_1S] = fi[2]->IrHiTime[IR_WL_395];
+		epr_sm[EEP_EVT_IR395_HI_PEAK_BF_1S] = (U16)(fi[2]->IrHiPeak[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_HI_AVRG_BF_1S] = (U16)(fi[2]->IrHiAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_1S_AVRG_BF_1S] = (U16)(fi[2]->Ir1sAvrg[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_1S_PTOP_BF_1S] = (U16)(fi[2]->Ir1sPtoP[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_AV_PTOP_BF_1S] = (U16)(fi[2]->IrAvPtoP[IR_WL_395]*1000);
+		epr_sm[EEP_EVT_IR395_IR_SIZE_BF_1S] = fi[2]->IrSize[IR_WL_395];
+		
+		epr_sm[EEP_EVT_IR530_LO_FREQ_BF_3S] = fi[0]->IrLoFreq[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_TIME_BF_3S] = fi[0]->IrLoTime[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_PEAK_BF_3S] = (U16)(fi[0]->IrLoPeak[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_LO_AVRG_BF_3S] = (U16)(fi[0]->IrLoAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_HI_FREQ_BF_3S] = fi[0]->IrHiFreq[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_HI_TIME_BF_3S] = fi[0]->IrHiTime[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_HI_PEAK_BF_3S] = (U16)(fi[0]->IrHiPeak[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_HI_AVRG_BF_3S] = (U16)(fi[0]->IrHiAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_1S_AVRG_BF_3S] = (U16)(fi[0]->Ir1sAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_1S_PTOP_BF_3S] = (U16)(fi[0]->Ir1sPtoP[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_AV_PTOP_BF_3S] = (U16)(fi[0]->IrAvPtoP[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_IR_SIZE_BF_3S] = fi[0]->IrSize[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_FREQ_BF_2S] = fi[1]->IrLoFreq[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_TIME_BF_2S] = fi[1]->IrLoTime[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_PEAK_BF_2S] = (U16)(fi[1]->IrLoPeak[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_LO_AVRG_BF_2S] = (U16)(fi[1]->IrLoAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_HI_FREQ_BF_2S] = fi[1]->IrHiFreq[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_HI_TIME_BF_2S] = fi[1]->IrHiTime[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_HI_PEAK_BF_2S] = (U16)(fi[1]->IrHiPeak[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_HI_AVRG_BF_2S] = (U16)(fi[1]->IrHiAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_1S_AVRG_BF_2S] = (U16)(fi[1]->Ir1sAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_1S_PTOP_BF_2S] = (U16)(fi[1]->Ir1sPtoP[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_AV_PTOP_BF_2S] = (U16)(fi[1]->IrAvPtoP[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_IR_SIZE_BF_2S] = fi[1]->IrSize[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_FREQ_BF_1S] = fi[2]->IrLoFreq[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_TIME_BF_1S] = fi[2]->IrLoTime[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_LO_PEAK_BF_1S] = (U16)(fi[2]->IrLoPeak[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_LO_AVRG_BF_1S] = (U16)(fi[2]->IrLoAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_HI_FREQ_BF_1S] = fi[2]->IrHiFreq[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_HI_TIME_BF_1S] = fi[2]->IrHiTime[IR_WL_530];
+		epr_sm[EEP_EVT_IR530_HI_PEAK_BF_1S] = (U16)(fi[2]->IrHiPeak[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_HI_AVRG_BF_1S] = (U16)(fi[2]->IrHiAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_1S_AVRG_BF_1S] = (U16)(fi[2]->Ir1sAvrg[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_1S_PTOP_BF_1S] = (U16)(fi[2]->Ir1sPtoP[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_AV_PTOP_BF_1S] = (U16)(fi[2]->IrAvPtoP[IR_WL_530]*1000);
+		epr_sm[EEP_EVT_IR530_IR_SIZE_BF_1S] = fi[2]->IrSize[IR_WL_530];
+		
+		for( i=EEP_EVT_IR395_LO_FREQ_BF_3S; i<=EEP_EVT_IR530_IR_SIZE_BF_1S; i++ ){
+			EEP_Wr( i, epr_sm[i] );
+		}
+	}
+	else {
+		epr_sm[EEP_EVT_CPS_RAW_BF_3S] = fi[0]->UvCpsRaw;
+		epr_sm[EEP_EVT_CPS_RES_BF_3S] = (U16)(fi[0]->UvCpsRes*10);
+		epr_sm[EEP_EVT_CPS_RAW_BF_2S] = fi[1]->UvCpsRaw;
+		epr_sm[EEP_EVT_CPS_RES_BF_2S] = (U16)(fi[1]->UvCpsRes*10);
+		epr_sm[EEP_EVT_CPS_RAW_BF_1S] = fi[2]->UvCpsRaw;
+		epr_sm[EEP_EVT_CPS_RES_BF_1S] = (U16)(fi[2]->UvCpsRes*10);
+		
+		for( i=EEP_EVT_CPS_RAW_BF_3S; i<=EEP_EVT_CPS_RES_BF_1S; i++ ){
+			EEP_Wr( i, epr_sm[i] );
+		}
+	}
+	
+	EEP_CRC_Wr(EEP_BLOCK_1);
+	
+	if( EEP_CRC_Check(EEP_BLOCK_1) ){
+		EepErrorFlag = EEP_EVT_IR430_LO_FREQ_BF_3S;
+	}
+	else {
+		EepErrorFlag = 0;
+	}
+}

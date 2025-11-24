@@ -1,0 +1,67 @@
+#ifndef __mmi_h__
+#define __mmi_h__
+
+//extern MMI_MODE	mmi_mode;
+
+enum {
+	FMODE_WARM_UP = 0,
+	FMODE_NORMAL,
+	FMODE_CONFIGIURATION,
+	FMODE_DET_RELAY_SET,
+	FMODE_DET_IR_RESPONSIVITY_SET,
+	FMODE_ADDRESS_SET,
+	FMODE_DET_EEP_CLEAR_MODE,
+	FMODE_DET_EEP_EVENT_LOG_CLEAR,
+	FMODE_DET_EEP_CALIBRATION_CLEAR,
+	FMODE_DET_EEP_FACTRORY_CLEAR,
+	FMODE_DET_TEST_MODE,
+	FMODE_DEV_MA_CAL_SET,
+	FMODE_DET_MA_CAL_SET,
+	FMODE_RESET_COMFIRM,
+	FMODE_NOT_CONNECTOR,
+	FMODE_MAX
+};
+
+enum {
+	ALARM_STATE_NO = 0,
+	ALARM_STATE_BIT_PROGRESS,
+	ALARM_STATE_WARNING,
+	ALARM_STATE_IR,
+	ALARM_STATE_UV,
+	ALARM_STATE_FLAME,
+	ALARM_STATE_PWR_FAULT,
+	ALARM_STATE_BIT_FAULT,
+	ALARM_STATE_IR_OFFSET_FAULT,
+	ALARM_STATE_EEP_FAULT,
+	ALARM_STATE_MODBUS_FAULT,
+	ALARM_WRITE_SINGLE_COMM_SUC,
+	ALARM_WRITE_SINGLE_COMM_ERR,
+	ALARM_STATE_MAX
+};
+
+extern U16		mmi_mode;
+extern U8		det_input_reg_data_old;
+extern U16		det_status_data_arry[2][5];
+extern U8		Det_ma_cal_flag;
+extern const S16 	DET_EEP_SYS_DEFAULT[];
+extern U16		ModeSetFlow[FMODE_MAX];
+extern U16		ModeSetTime[FMODE_MAX];
+extern U16		ModeSetFlag[FMODE_MAX];
+
+extern void Initialize_System( void );
+extern void Initialize_ModeFlag(void);
+extern void LCD_Operating(void);
+extern void Func_Warm_Up(void);
+extern void Func_Normal(void);
+extern void Func_Configration(void);
+extern void Func_Address_Set(void);
+extern void Func_Det_mA_Cal_Set(void);
+extern void Func_Dev_mA_Cal_Set(void);
+extern void Func_Det_Relay_Set(void);
+extern void Func_Det_IR_Responsivity_Set(void);
+extern void Func_Det_Eep_Clear_Mode(void);
+extern void Func_Det_Test_Mode(void);
+extern void Fnuc_Not_Connector(void);
+extern void Func_Reset_Confirm(U8 mode);
+
+#endif // __mmi_h__

@@ -1,0 +1,753 @@
+#include <stdio.h>
+#include <avr/io.h>
+
+#include "global.h"
+#include "dbg_printf.h"
+
+#include "mkey.h"
+#include "gpio.h"
+#include "mmi.h"
+#include "timer.h"
+#include "uart2560.h"
+#include "modbus.h"
+#include "eeprom.h"
+#include "adc.h"
+#include "lcd.h"
+
+U16	key_cnt;
+U8	key_down_flag;
+U8	KeyData, KeyBuf;
+U8	Key_long_flag;
+U8	setting_mode_cursor;
+U8	key_func_select_flag;
+U8	alm_relay_chk, trb_relay_chk;
+U8	alm_relay_operation, trb_relay_operation;
+U8	relay_chk_cnt;
+U16	det_ir_reponsivity_466, det_ir_reponsivity_395, det_ir_reponsivity_530;
+
+void Initialize_Mkey( void )
+{
+	key_cnt = 0;
+	key_down_flag = 0;
+	KeyData = 0xff;
+	Key_long_flag = 0;
+	setting_mode_cursor = 0;
+	key_func_select_flag = 0;
+	
+	alm_relay_chk = 0;
+	trb_relay_chk = 0;
+	relay_chk_cnt = 0;
+}
+
+
+void Key_Check(void)
+{
+U8 	dat, cop;
+
+	//if(sTimerFlag[TMR_KEY_CNK] == 0){
+	//	return;
+	//}
+	
+	//sTimerFlag[TMR_KEY_CNK] = 0;
+	
+	dat = (PINE >> 2) & 0x1F;
+	cop = dat ^ 0x1f;
+	
+	if(cop != 0){
+		if( (mmi_mode != FMODE_ADDRESS_SET) & (mmi_mode != FMODE_DET_IR_RESPONSIVITY_SET) ){
+			if(key_down_flag != 2){
+				if(key_cnt == 1000){
+					key_down_flag = 1;
+					Key_long_flag = 2;
+				}
+				else{
+					if(key_down_flag == 0){
+						key_cnt++;	
+					}
+					else{
+						key_cnt = 0;
+					}
+				}
+				KeyBuf = cop;
+			}
+		}
+		else{
+			if(key_cnt == 1000){
+				key_down_flag = 1;
+				Key_long_flag = 3;
+				key_cnt = 1000;
+			}
+			else{
+				if(key_down_flag == 0){
+					key_cnt++;	
+				}
+				else{
+					key_cnt = 0;
+				}
+			}
+			KeyBuf = cop;
+		}
+		
+	}
+	else{
+		if(key_cnt == 0){
+			KeyBuf = 0;
+			Key_long_flag = 0;
+			key_down_flag = 0;
+		}
+		else if( (key_cnt < KEY_LONG_CNT) && (key_cnt > KEY_SHORT_CNT) ){
+			Key_long_flag = 1;
+			key_down_flag = 1;
+		}
+	}
+}
+
+void Relay_Check(void)
+{
+	U8 	dat, cop;
+	
+	dat = (PINJ >> 2) & 0x07;
+	cop = dat ^ 0x07;
+	
+	if(cop & 0x01){
+		alm_relay_chk = 1;
+	}
+	else{
+		alm_relay_chk = 0;
+	}
+	
+	if(cop & 0x02){
+		trb_relay_chk = 1;
+	}
+	else{
+		trb_relay_chk = 0;
+	}
+}
+
+void Key_scan(void)
+{	
+	//DPRINT3("KeyBuf = %x, cop = %x, _M_KEY_PORT = %x\n", KeyBuf, cop, _M_KEY_PORT);
+	//DPRINT2("key_down_flag = %d, %d\n", key_down_flag, Key_long_flag);
+	if(key_down_flag == 1)
+	{
+		if( (mmi_mode != FMODE_ADDRESS_SET) & (mmi_mode != FMODE_DET_IR_RESPONSIVITY_SET) ){
+			key_down_flag = 2;
+		}
+		if(Key_long_flag == 1){
+			switch(KeyBuf){
+				case _KEY_S1_F:
+					KeyData = KEY_FU_S;
+					break;
+				case _KEY_S2_UP:
+					KeyData = KEY_UP_S;
+					break;
+				case _KEY_S3_DN:
+					KeyData = KEY_DW_S;
+					break;
+				case _KEY_S4_RST:
+					KeyData = KEY_RE_S;
+					break;
+				case _KEY_S5_TEST:
+					KeyData = KEY_TE_S;
+					break;
+			}
+			key_cnt = 0;
+		}
+		else if(Key_long_flag > 1){
+			switch(KeyBuf){
+				case _KEY_S1_F:
+					KeyData = KEY_FU_L;
+					break;
+				case _KEY_S2_UP:
+					KeyData = KEY_UP_L;
+					break;
+				case _KEY_S3_DN:
+					KeyData = KEY_DW_L;
+					break;
+				case _KEY_S4_RST:
+					KeyData = KEY_RE_L;
+					break;
+				case _KEY_S5_TEST:
+					KeyData = KEY_TE_L;
+					break;
+			}
+			key_cnt = 0;
+		}
+	}
+}
+
+void Key_Task(void)
+{
+	/*
+	switch(KeyData){
+		case KEY_FU_S:	break;
+		case KEY_UP_S:	break;
+		case KEY_DW_S:	break;
+		case KEY_RE_S:	break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+	*/
+	if(mmi_mode == FMODE_WARM_UP){
+		Func_Warm_Up_Key();
+	}
+	else if(mmi_mode == FMODE_NORMAL){
+		Func_Normal_Key();
+	}
+	else if(mmi_mode == FMODE_CONFIGIURATION){
+		Func_Configiuration_Key();
+	}
+	else if(mmi_mode == FMODE_ADDRESS_SET){
+		Func_Address_Set_Key();
+	}
+	else if(mmi_mode == FMODE_DET_MA_CAL_SET){
+		Func_Det_Ma_Cal_Set_Key();
+	}
+	else if(mmi_mode == FMODE_DEV_MA_CAL_SET){
+		Func_Dev_Ma_Cal_Set_Key();
+	}
+	else if(mmi_mode == FMODE_DET_RELAY_SET){
+		Func_Det_Relay_Set_Key();
+	}
+	else if(mmi_mode == FMODE_DET_IR_RESPONSIVITY_SET){
+		Func_Det_Ir_Responsivity_Set_Key();	
+	}
+	else if(mmi_mode == FMODE_DET_TEST_MODE){
+		Func_Det_Test_Mode_Key();
+	}
+	else if(mmi_mode == FMODE_DET_EEP_CLEAR_MODE){
+		Func_Det_Eep_Clear_Mode_Key();
+	}
+	Normal_Return_Check();
+	KeyData = 0xff;
+}
+
+void Func_Warm_Up_Key(void)
+{
+	switch(KeyData){
+		case KEY_FU_S:	break;
+		case KEY_UP_S:	break;
+		case KEY_DW_S:
+			mmi_mode = FMODE_NORMAL;
+			sTimerTick[TMR_SELFTEST] = 0;
+			break;
+		case KEY_RE_S:	break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+}
+
+void Func_Normal_Key(void)
+{
+	switch(KeyData){
+		case KEY_FU_S:
+			mmi_mode = FMODE_CONFIGIURATION;
+			break;
+		case KEY_UP_S:
+			mmi_mode = FMODE_DET_MA_CAL_SET;
+			ModeSetFlow[FMODE_DET_MA_CAL_SET] = 1;
+			break;
+		case KEY_DW_S:
+			break;
+		case KEY_RE_S:
+			break;
+		case KEY_TE_S:
+			mmi_mode = FMODE_DET_TEST_MODE;
+			ModeSetFlow[FMODE_DET_TEST_MODE] = 1;
+			break;
+		case KEY_FU_L:
+			break;
+		case KEY_UP_L:	
+			break;
+		case KEY_DW_L:
+			mmi_mode = FMODE_DET_EEP_CLEAR_MODE;
+			ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE] = 1;
+			//Det_Write_Multi_Func();
+			break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:
+			//Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,1);
+			break;
+	}
+}
+
+void Func_Configiuration_Key(void)
+{
+	Cousor_Location(line_1, line_4);
+		
+	switch(KeyData){
+		case KEY_FU_S:
+			switch(setting_mode_cursor){
+				case line_1:
+					mmi_mode = FMODE_DET_RELAY_SET;
+					alm_relay_operation = Det_Holding_Reg_Data[DET_EEP_ALM_RLY_OPERATION];
+					trb_relay_operation = Det_Holding_Reg_Data[DET_EEP_TRB_RLY_OPERATION];
+					break;
+				case line_2:
+					mmi_mode = FMODE_DET_IR_RESPONSIVITY_SET;
+					det_ir_reponsivity_466 = Det_Holding_Reg_Data[DET_EEP_CAL_BUF_IR430_RESPONSIVITY];
+					//det_ir_reponsivity_395 = Det_Holding_Reg_Data[DET_EEP_CAL_BUF_IR430_RESPONSIVITY];
+					//det_ir_reponsivity_530 = Det_Holding_Reg_Data[DET_EEP_CAL_BUF_IR430_RESPONSIVITY];
+					//DPRINT1("det_ir_reponsivity_466 = %d\n", det_ir_reponsivity_466);
+					break;
+				case line_3:
+					mmi_mode = FMODE_ADDRESS_SET;
+					break;
+				case line_4:
+					mmi_mode = FMODE_DEV_MA_CAL_SET;
+					break;
+			}
+			setting_mode_cursor = 0;
+			break;
+		case KEY_UP_S:
+		case KEY_DW_S:
+			break;
+		case KEY_RE_S:
+			Reset_Key_Check();
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+}
+
+void Func_Address_Set_Key(void)
+{
+	Cousor_Location(line_1, line_2);
+		
+	switch(KeyData){
+		case KEY_FU_S:
+			if(key_func_select_flag){
+				key_func_select_flag = 0;
+				if(setting_mode_cursor == line_1){
+					EEP_Sys_Wr(EEP_Detector_Address, Det_Address);
+				}
+				else if(setting_mode_cursor == line_2){
+					EEP_Sys_Wr(EEP_Device_Address, Dvc_Address);
+				}
+			}
+			else{
+				key_func_select_flag = 1;
+			}
+			break;
+		case KEY_UP_S:
+		case KEY_DW_S:
+			if(!key_func_select_flag){
+				//Cousor_Location(line_1, line_2);
+			}
+			else{
+				if(setting_mode_cursor == line_1){
+					Det_Address = Long_Key(Det_Address);
+				
+					if(Det_Address > 245){
+						Det_Address = 245;
+					}
+					else if(Det_Address < 1){
+						Det_Address = 1;
+					}
+				}
+				else if(setting_mode_cursor == line_2){
+					Dvc_Address = Long_Key(Dvc_Address);
+				
+					if(Dvc_Address > 245){
+						Dvc_Address = 245;
+					}
+					else if(Dvc_Address < 1){
+						Dvc_Address = 1;
+					}
+				}
+			}
+			break;
+		case KEY_RE_S:
+			if(key_func_select_flag){
+				key_func_select_flag = 0;
+			}
+			else{
+				Reset_Key_Check();
+			}
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:
+		case KEY_DW_L:
+			if(!key_func_select_flag){
+				//Cousor_Location(line_1, line_2);
+			}
+			else{
+				if(setting_mode_cursor == line_1){
+					Det_Address = Long_Key(Det_Address);
+				
+					if(Det_Address > 245){
+						Det_Address = 245;
+					}
+					else if(Det_Address < 1){
+						Det_Address = 1;
+					}
+				}
+				else if(setting_mode_cursor == line_2){
+					Dvc_Address = Long_Key(Dvc_Address);
+				
+					if(Dvc_Address > 245){
+						Dvc_Address = 245;
+					}
+					else if(Dvc_Address < 1){
+						Dvc_Address = 1;
+					}
+				}
+			}
+			break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+}
+
+void Func_Det_Ma_Cal_Set_Key(void)
+{
+	switch(KeyData){
+		case KEY_FU_S:	break;
+		case KEY_UP_S:	break;
+		case KEY_DW_S:	break;
+		case KEY_RE_S:
+			//Reset_Key_Check();
+			//Det_ma_cal_flag = 0;
+			ModeSetFlow[FMODE_RESET_COMFIRM] = 1;
+			//ModeSetFlag[FMODE_RESET_COMFIRM] = 1;
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+	
+	if(ModeSetFlow[FMODE_RESET_COMFIRM] > 0){
+		Func_Reset_Confirm(mmi_mode);
+	}
+}
+
+void Func_Dev_Ma_Cal_Set_Key(void)
+{
+	switch(KeyData){
+		case KEY_FU_S:
+			if(key_func_select_flag == 0){
+				EEP_Sys_Wr(EEP_4mA_Data, fADBuf[0]);
+				key_func_select_flag++;
+				DPRINT("4mA Set\n");
+			}
+			else if(key_func_select_flag == 1){
+				EEP_Sys_Wr(EEP_20mA_Data, fADBuf[0]);
+				key_func_select_flag++;
+				sTimerTick[TMR_NORMAL_RETURN] = NORMAL_RETURN_CNT;
+				DPRINT("20mA Set\n");
+			}
+			else if(key_func_select_flag == 2){
+				DPRINT("Complete\n");
+			}
+			break;
+		case KEY_UP_S:	break;
+		case KEY_DW_S:	break;
+		case KEY_RE_S:
+			if(key_func_select_flag > 0){
+				key_func_select_flag = 0;
+			}
+			else{
+				Reset_Key_Check();
+			}
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+}
+
+void Func_Det_Relay_Set_Key(void)
+{
+	Cousor_Location(line_1, line_2);
+		
+	switch(KeyData){
+		case KEY_FU_S:
+			if(key_func_select_flag == 1){
+				key_func_select_flag = 0;
+				
+				if(setting_mode_cursor == line_1){
+					if(alm_relay_operation == 0)	Det_Write_Single_Func(DET_EEP_ALM_RLY_OPERATION, 0);
+					else				Det_Write_Single_Func(DET_EEP_ALM_RLY_OPERATION, 1);
+				}
+				else if(setting_mode_cursor == line_2){
+					if(trb_relay_operation == 0)	Det_Write_Single_Func(DET_EEP_TRB_RLY_OPERATION, 0);
+					else				Det_Write_Single_Func(DET_EEP_TRB_RLY_OPERATION, 1);
+				}
+			}
+			else{
+				key_func_select_flag = 1;
+			}
+			break;
+		case KEY_UP_S:
+		case KEY_DW_S:
+			if(key_func_select_flag == 0){
+				//Cousor_Location(line_1, line_2);
+			}
+			else if(key_func_select_flag == 1){
+				if(setting_mode_cursor == line_1){
+					if(alm_relay_operation == 0)	alm_relay_operation = 1;
+					else				alm_relay_operation = 0;
+				}
+				else if(setting_mode_cursor == line_2){
+					if(trb_relay_operation == 0)	trb_relay_operation = 1;
+					else				trb_relay_operation = 0;
+				}
+			}
+			break;
+		case KEY_RE_S:
+			if(key_func_select_flag){
+				key_func_select_flag = 0;
+			}
+			else{
+				Reset_Key_Check();
+			}
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+}
+
+void Func_Det_Ir_Responsivity_Set_Key(void)
+{
+
+	Cousor_Location(line_1, line_3);
+		
+	switch(KeyData){
+		case KEY_FU_S:
+			if(key_func_select_flag){
+				key_func_select_flag = 0;
+				
+				if(setting_mode_cursor == line_1){
+					//Det_Write_Single_Func(DET_EEP_CAL_BUF_IR430_RESPONSIVITY, det_ir_reponsivity_466);
+				}
+				/*
+				else if(setting_mode_cursor == line_2){
+					Det_Write_Single_Func(DET_EEP_CAL_BUF_IR430_RESPONSIVITY, det_ir_reponsivity_466);
+				}
+				else if(setting_mode_cursor == line_3){
+					Det_Write_Single_Func(DET_EEP_CAL_BUF_IR430_RESPONSIVITY, det_ir_reponsivity_466);
+				}
+				*/
+			}
+			else{
+				key_func_select_flag = 1;
+			}
+			break;
+		case KEY_UP_S:
+		case KEY_DW_S:
+			if(!key_func_select_flag){
+				//Cousor_Location(line_1, line_3);
+			}
+			else{
+				if(setting_mode_cursor == line_1){
+					det_ir_reponsivity_466 = Long_Key(det_ir_reponsivity_466);
+				
+					if(det_ir_reponsivity_466 > 2000){
+						det_ir_reponsivity_466 = 2000;
+					}
+					else if(det_ir_reponsivity_466 < 1){
+						det_ir_reponsivity_466 = 1;
+					}
+				}
+				else if(setting_mode_cursor == line_2){
+					det_ir_reponsivity_466 = Long_Key(det_ir_reponsivity_466);
+				
+					if(det_ir_reponsivity_466 > 2000){
+						det_ir_reponsivity_466 = 2000;
+					}
+					else if(det_ir_reponsivity_466 < 1){
+						det_ir_reponsivity_466 = 1;
+					}
+				}
+				
+			}
+			break;
+		case KEY_RE_S:
+			if(key_func_select_flag){
+				key_func_select_flag = 0;
+			}
+			else{
+				Reset_Key_Check();
+			}
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:
+		case KEY_DW_L:
+			if(!key_func_select_flag){
+				//Cousor_Location(line_1, line_3);
+			}
+			else{
+				if(setting_mode_cursor == line_1){
+					det_ir_reponsivity_466 = Long_Key(det_ir_reponsivity_466);
+				
+					if(det_ir_reponsivity_466 > 2000){
+						det_ir_reponsivity_466 = 2000;
+					}
+					else if(det_ir_reponsivity_466 < 1){
+						det_ir_reponsivity_466 = 1;
+					}
+				}
+				else if(setting_mode_cursor == line_2){
+					det_ir_reponsivity_466 = Long_Key(det_ir_reponsivity_466);
+				
+					if(det_ir_reponsivity_466 > 2000){
+						det_ir_reponsivity_466 = 2000;
+					}
+					else if(det_ir_reponsivity_466 < 1){
+						det_ir_reponsivity_466 = 1;
+					}
+				}
+				
+			}
+			break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}	
+}
+
+void Func_Det_Test_Mode_Key(void)
+{
+	switch(KeyData){
+		case KEY_RE_S:
+			//mmi_mode = FMODE_RESET_COMFIRM;
+			ModeSetFlow[FMODE_RESET_COMFIRM] = 1;
+			Func_Reset_Confirm(mmi_mode);
+			break;
+	}
+}
+
+void Func_Det_Eep_Clear_Mode_Key(void)
+{
+	Cousor_Location(line_2, line_4);
+
+	switch(KeyData){
+		case KEY_FU_S:
+			switch(setting_mode_cursor){
+				case line_2:
+					Det_Write_Single_Func(DET_EEP_CLEAR_MODE,1);
+					ModeSetFlag[FMODE_DET_EEP_CLEAR_MODE] = 1;
+					break;
+				case line_3:
+					Det_Write_Single_Func(DET_EEP_CLEAR_MODE,2);
+					ModeSetFlag[FMODE_DET_EEP_CLEAR_MODE] = 2;
+					break;
+				case line_4:
+					Det_Write_Single_Func(DET_EEP_CLEAR_MODE,3);
+					ModeSetFlag[FMODE_DET_EEP_CLEAR_MODE] = 3;
+					break;
+			}
+			ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE] = 2;
+			LCD_Clear_Line_All();
+			setting_mode_cursor = 0;
+			break;
+		case KEY_UP_S:
+		case KEY_DW_S:
+			break;
+		case KEY_RE_S:
+			Reset_Key_Check();
+			break;
+		case KEY_TE_S:	break;
+		case KEY_FU_L:	break;
+		case KEY_UP_L:	break;
+		case KEY_DW_L:	break;
+		case KEY_RE_L:	break;
+		case KEY_TE_L:	break;
+	}
+}
+
+U8 Cousor_Location(U8 start, U8 end)
+{
+	if(KeyData == KEY_UP_S){
+		if(key_func_select_flag == 0){
+			if(setting_mode_cursor != start){
+				setting_mode_cursor--;
+			}
+			else{
+				setting_mode_cursor = end;
+			}
+		}
+	}
+	else if(KeyData == KEY_DW_S){
+		if(key_func_select_flag == 0){
+			if(setting_mode_cursor != end){
+				setting_mode_cursor++;
+			}
+			else{
+				setting_mode_cursor = start;
+			}
+		}
+	}
+	
+	if(setting_mode_cursor < start){
+		setting_mode_cursor = start;
+	}
+	
+	return setting_mode_cursor;
+}
+
+U16 Long_Key(U16 cnt)
+{
+	if(key_func_select_flag == 1){
+		if( (KeyData == KEY_UP_S) | (KeyData == KEY_UP_L) ){
+			cnt++;
+		}
+		else if( (KeyData == KEY_DW_S) | (KeyData == KEY_DW_L) ){
+			cnt--;
+		}
+	}
+	
+	return cnt;
+}
+
+void Normal_Return_Check(void)
+{
+	if(KeyData != 0xff){
+		sTimerFlag[TMR_NORMAL_RETURN] = 1;
+		if(mmi_mode >= FMODE_DEV_MA_CAL_SET){
+			sTimerTick[TMR_NORMAL_RETURN] = LONG_RETURN_CNT;
+		}
+		else{
+			sTimerTick[TMR_NORMAL_RETURN] = NORMAL_RETURN_CNT;
+		}
+	}
+}
+
+void Reset_Key_Check(void)
+{
+	if( (mmi_mode == FMODE_CONFIGIURATION) || (mmi_mode == FMODE_DET_TEST_MODE) ){
+		mmi_mode = FMODE_NORMAL;
+	}
+	else if(mmi_mode > FMODE_CONFIGIURATION){
+		mmi_mode = FMODE_CONFIGIURATION;
+	}
+	
+	det_input_reg_data_old = 0xff;
+	setting_mode_cursor = 0;
+	key_func_select_flag = 0;
+	
+	Initialize_ModeFlag();
+}

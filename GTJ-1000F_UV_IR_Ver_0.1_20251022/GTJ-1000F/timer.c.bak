@@ -1,0 +1,331 @@
+/*
+*******************************************************************************
+* COPYRIGHT (c) 1992-2012 GASTRON Co.,Ltd. All rights reserved.
+*******************************************************************************
+* Model Name	: GTF-1100 Series
+* Module name	: 
+* Description	: 
+* Version		: REV 0.51
+* Start Date	: 2017.01.17
+* Modify Date	: 2018.06.14
+* C-Compiler	: avr-gcc
+* MPU			: ATmega1281
+* Written by	: Min-Sung, Kang (mskang@gastron.com)
+*******************************************************************************
+*/
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include <avr/io.h>
+#include <stdio.h>
+#include <avr/interrupt.h>
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include "global.h"
+#include "dbg_printf.h"
+
+#include "timer.h"
+#include "gpio.h"
+#include "uart2560.h"
+#include "modbus.h"
+#include "mkey.h"
+#include "adc.h"
+#include "lcd.h"
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+U16	sTimerTick[ TMR_BUFF_MAX ];
+U16	sTimerFlag[ TMR_BUFF_MAX ];
+
+void Initialize_Timer( void );
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Initialize_Timer( void )
+{
+	TCCR3A = 0x00;
+	TCCR3B = 0x01; 			//No prescaling
+	TCNT3 = TMR3_REG_VALUE; 	//Enable TOIE3
+	
+	TIMSK3 = 0x01;
+	
+	sTimerTick[TMR_10MS] = 10;
+	sTimerFlag[TMR_10MS] = 0;
+	
+	sTimerTick[TMR_50MS] = 50;
+	sTimerFlag[TMR_50MS] = 0;
+	
+	sTimerTick[TMR_100MS] = 100;
+	sTimerFlag[TMR_100MS] = 0;
+	
+	sTimerTick[TMR_250MS] = 250;
+	sTimerFlag[TMR_250MS] = 0;
+
+	sTimerTick[TMR_500MS] = 500;
+	sTimerFlag[TMR_500MS] = 0;
+
+	sTimerTick[TMR_1000MS] = 1000;
+	sTimerFlag[TMR_1000MS] = 0;
+
+	sTimerTick[TMR_SELFTEST] = 2;
+
+	sTimerTick[TMR_NORMAL_RETURN] = NORMAL_RETURN_CNT;
+	sTimerFlag[TMR_NORMAL_RETURN] = 0;
+
+	sTimerTick[TMR_MODBUS_START] = MODBUS_START_TIME;
+	sTimerFlag[TMR_MODBUS_START] = 0;
+
+	sTimerTick[TMR_MODBUS_TIMEOUT] = 0;
+	sTimerFlag[TMR_MODBUS_TIMEOUT] = 0;
+	
+	sTimerTick[TMR_MODBUS_DELAY] = 5;
+	sTimerFlag[TMR_MODBUS_DELAY] = 0;
+	sTimerTick[TMR_MODBUS_ERR] = 5000;
+	
+	sTimerTick[TMR_ADC_TASK] = 0x8018;
+	sTimerFlag[TMR_ADC_TASK] = 0;
+	
+	sTimerTick[TMR_KEY_CNK] = 1;
+	sTimerFlag[TMR_KEY_CNK] = 0;
+	
+//	sTimerFlag[TMR_NORMAL_RETURN_COM] = 0;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Timer3 overflow interrupt service routine
+ISR(TIMER3_OVF_vect)
+{
+	TCNT3 = TMR3_REG_VALUE; //Enable TOIE3
+	
+	Key_Check();
+	Relay_Check();
+	USART1_Rx_Packet_Check();
+	USART2_Rx_Packet_Check();
+	
+	sTimerTick[TMR_KEY_CNK]--;
+	if(sTimerTick[TMR_KEY_CNK] == 0){
+		sTimerTick[TMR_KEY_CNK] = 1;
+		sTimerFlag[TMR_KEY_CNK] = 1;
+	}
+	
+	if( sTimerTick[TMR_ADC_TASK] & 0x8000 ){
+		if( sTimerTick[TMR_ADC_TASK] == 0x8000 ){
+			//sTimerTick[TMR_ADC_TASK] = 0x8018; // 25ms 
+			sTimerTick[TMR_ADC_TASK] = 0x8003; // 25ms 
+			sTimerFlag[TMR_ADC_TASK] = 1;
+			
+			ADC_StartConversion;
+		}
+		else {
+			sTimerTick[TMR_ADC_TASK]--;
+		}
+	}
+	
+	sTimerTick[TMR_MODBUS_START]--;
+	if(sTimerTick[TMR_MODBUS_START] == 0)
+	{
+		sTimerTick[TMR_MODBUS_START] = MODBUS_START_TIME;
+		sTimerFlag[TMR_MODBUS_START]++;
+		if(sTimerFlag[TMR_MODBUS_START] == (MODBUS_START_TIME / 2) ){
+			sTimerFlag[TMR_MODBUS_START] = 0;
+		}
+		
+		/*
+		if(!Det_Modbus_Buf[Det_Write_Register_Flag]){
+			Det_Modbus_Buf[Det_Reg_Status] = usart2_input_ready;
+			holding_data_cnt = 0;
+			//DPRINT1("485 Start input %d\n", sTimerFlag[TMR_MODBUS_START]);
+		}
+		else if(Det_Modbus_Buf[Det_Write_Register_Flag] == 1){
+			Det_Modbus_Buf[Det_Reg_Status] = usart2_write_s_ready;
+			Det_Modbus_Buf[Det_Write_Register_Set_Flag] = 1;
+			//DPRINT1("485 Start write s %d\n", sTimerFlag[TMR_MODBUS_START]);
+		}
+		else if(Det_Modbus_Buf[Det_Write_Register_Flag] == 2){
+			Det_Modbus_Buf[Det_Reg_Status] = usart2_write_m_1st_ready;
+			Det_Modbus_Buf[Det_Write_Register_Set_Flag] = 1;
+			//DPRINT1("485 Start write m %d\n", sTimerFlag[TMR_MODBUS_START]);
+		}
+		*/
+		
+		Det_Modbus_Buf[Det_Reg_Status] = usart2_input_ready;
+		holding_data_cnt = 0;
+	}
+		
+	if( sTimerTick[TMR_MODBUS_TIMEOUT] & 0x8000 ){
+		if( sTimerTick[TMR_MODBUS_TIMEOUT] == 0x8000 ){
+			sTimerTick[TMR_MODBUS_TIMEOUT] = 0;
+			
+			sTimerFlag[TMR_MODBUS_TIMEOUT] = 1;
+		}
+		else {
+			sTimerTick[TMR_MODBUS_TIMEOUT]--;
+		}
+	}
+	
+	if( sTimerTick[TMR_DET_TIMEOUT] & 0x8000 ){
+		if( sTimerTick[TMR_DET_TIMEOUT] == 0x8000 ){
+			sTimerTick[TMR_DET_TIMEOUT] = 0;
+			
+			Det_Modbus_Buf[Det_Write_Err_Flag] = 3;
+			DPRINT("TO\n");
+			
+			DET_Rx2Cnt = 0;
+		}
+		else {
+			sTimerTick[TMR_DET_TIMEOUT]--;
+		}
+	}
+	
+	if(sTimerFlag[TMR_MODBUS_DELAY] == 1){
+		sTimerTick[TMR_MODBUS_DELAY]--;
+		if(sTimerTick[TMR_MODBUS_DELAY] == 0)
+		{
+			sTimerTick[TMR_MODBUS_DELAY] = 5;
+			sTimerFlag[TMR_MODBUS_DELAY] = 0;
+			
+			Det_Modbus_Buf[Det_Write_Err_Flag] = 0;
+			
+			/*
+			if(Det_Modbus_Buf[Det_Write_Register_Set_Flag] == 0){
+				//if(Det_Modbus_Buf[Det_Reg_Status] < usart2_write_s_complete_delay){
+				if(Det_Modbus_Buf[Det_Reg_Status] < usart2_holding_complete_delay){
+					Det_Modbus_Buf[Det_Reg_Status]++;
+				}
+			}
+			else{
+				if(Det_Modbus_Buf[Det_Reg_Status] < usart2_reset_wating){
+					Det_Modbus_Buf[Det_Reg_Status]++;
+				}
+			}
+			*/
+			
+			if(Det_Modbus_Buf[Det_Reg_Status] < usart2_write_s_complete_delay){
+				Det_Modbus_Buf[Det_Reg_Status]++;
+			}
+			
+			DET_Rx2Cnt = 0;
+		}
+	}
+	
+	sTimerTick[TMR_10MS]--;
+	if(sTimerTick[TMR_10MS] == 0)
+	{
+		sTimerTick[TMR_10MS] = 10;
+		sTimerFlag[TMR_10MS] = 1;
+	}
+
+	sTimerTick[TMR_50MS]--;
+	if(sTimerTick[TMR_50MS] == 0)
+	{
+		sTimerTick[TMR_50MS] = 50;
+		sTimerFlag[TMR_50MS] = 1;
+	}
+
+	sTimerTick[TMR_100MS]--;
+	if(sTimerTick[TMR_100MS] == 0)
+	{
+		sTimerTick[TMR_100MS] = 100;
+		sTimerFlag[TMR_100MS] = 1;
+	}
+	
+	sTimerTick[TMR_250MS]--;
+	if(sTimerTick[TMR_250MS] == 0)
+	{
+		sTimerTick[TMR_250MS] = 250;
+		if(!key_down_flag){
+			sTimerFlag[TMR_250MS] = !sTimerFlag[TMR_250MS];
+		}
+		else{
+			sTimerFlag[TMR_250MS] = 1;
+		}
+	}
+	
+	sTimerTick[TMR_500MS]--;
+	if(sTimerTick[TMR_500MS] == 0)
+	{
+		sTimerTick[TMR_500MS] = 500;
+		sTimerFlag[TMR_500MS] = 1;
+	}
+
+	sTimerTick[TMR_1000MS]--;
+	if(sTimerTick[TMR_1000MS] == 0)
+	{
+		sTimerTick[TMR_1000MS] = 1000;
+		sTimerFlag[TMR_1000MS] = 1;
+		
+		if(mmi_mode < FMODE_NORMAL){
+			sTimerTick[TMR_SELFTEST]--;
+			if(sTimerTick[TMR_SELFTEST] == 0)
+			{
+				sTimerTick[TMR_SELFTEST] = 0;
+				mmi_mode = FMODE_NORMAL;
+			}
+		}
+		else if(mmi_mode > FMODE_NORMAL){
+			if(sTimerFlag[TMR_NORMAL_RETURN] == 1){
+				sTimerTick[TMR_NORMAL_RETURN]--;
+				//DPRINT1("A TMR_NORMAL_RETURN = %d\n", sTimerTick[TMR_NORMAL_RETURN]);
+			}
+			else{
+				sTimerTick[TMR_NORMAL_RETURN] = NORMAL_RETURN_CNT;
+				//DPRINT1("B TMR_NORMAL_RETURN = %d\n", sTimerTick[TMR_NORMAL_RETURN]);
+			}
+			
+			if(sTimerTick[TMR_NORMAL_RETURN] == 0)
+			{
+				sTimerFlag[TMR_NORMAL_RETURN] = 0;
+//				sTimerFlag[TMR_NORMAL_RETURN_COM] = 1;
+				mmi_mode = FMODE_NORMAL;
+				det_input_reg_data_old = 0xff;
+				key_func_select_flag = 0;
+				setting_mode_cursor = 0;
+			}
+		}
+		DET_LED_T();
+	}
+	
+	if(ModeSetFlow[FMODE_DET_MA_CAL_SET] > 0){
+		if(ModeSetTime[FMODE_DET_MA_CAL_SET] == 0){
+			ModeSetFlag[FMODE_DET_MA_CAL_SET] = 1;
+			ModeSetTime[FMODE_DET_MA_CAL_SET] = 1000;
+		}
+		else{
+			ModeSetTime[FMODE_DET_MA_CAL_SET]--;
+		}
+	}
+	
+	if(ModeSetFlow[FMODE_DET_TEST_MODE] > 0){
+		if(ModeSetTime[FMODE_DET_TEST_MODE] == 0){
+			ModeSetFlag[FMODE_DET_TEST_MODE] = 1;
+			ModeSetTime[FMODE_DET_TEST_MODE] = 1000;
+		}
+		else{
+			ModeSetTime[FMODE_DET_TEST_MODE]--;
+		}
+	}
+	
+	if(ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE] > 1){
+		if(ModeSetTime[FMODE_DET_EEP_CLEAR_MODE] == 0){
+			if(ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE] < 4){
+				ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE]++;
+			}
+			ModeSetTime[FMODE_DET_EEP_CLEAR_MODE] = 1000;
+		}
+		else{
+			ModeSetTime[FMODE_DET_EEP_CLEAR_MODE]--;
+		}
+	}
+
+	if(ModeSetFlow[FMODE_RESET_COMFIRM] > 0){
+		if(ModeSetTime[FMODE_RESET_COMFIRM] == 0){
+			ModeSetFlag[FMODE_RESET_COMFIRM] = 1;
+			ModeSetTime[FMODE_RESET_COMFIRM] = 1000;
+		}
+		else{
+			ModeSetTime[FMODE_RESET_COMFIRM]--;
+		}
+	}
+}
+

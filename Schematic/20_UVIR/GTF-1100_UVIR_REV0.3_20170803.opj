@@ -1,0 +1,53 @@
+(ExpressProject ""
+  (ProjectVersion "19981106")
+  (SoftwareVersion "17.4-2019 P001 (3823098) [10/7/2019]-[10/23/18]")
+  (ProjectType "PCB")
+  (Folder "Design Resources"
+    (Folder "Library")
+    ("Allegro Netlist Directory" "allegro")
+    (File ".\gtf-1100_uvir_rev0.3_20170803.dsn"
+      (Type "Schematic Design"))
+    (BuildFileAddedOrDeleted "x")
+    (CompileFileAddedOrDeleted "x")
+    (DOCKED "TRUE")
+    (DOCKING_POSITION "59420")
+    (NoModify))
+  (Folder "Layout")
+  (Folder "Outputs")
+  (Folder "Referenced Projects")
+  (Folder "PSpice Resources"
+    (Folder "Simulation Profiles")
+    (Folder "Model Libraries"
+      (Sort User))
+    (Folder "Stimulus Files"
+      (Sort User))
+    (Folder "Include Files"
+      (Sort User)))
+  (Folder "Logs")
+  (MPSSessionName "jasan1-380")
+  (GlobalState
+    (FileView
+      (Path "Design Resources")
+      (Path "Design Resources" ".\gtf-1100_uvir_rev0.3_20170803.dsn")
+      (Path "Design Resources" ".\gtf-1100_uvir_rev0.3_20170803.dsn"
+         "SCHEMATIC1")
+      (Select "Design Resources" ".\gtf-1100_uvir_rev0.3_20170803.dsn"
+         "SCHEMATIC1" "01. UV/IR Sensing"))
+    (HierarchyView)
+    (Doc
+      (Type "COrCapturePMDoc")
+      (Frame
+        (Placement "44 0 1 -1 -1 -1 -1 0 126 0 737"))
+      (Tab 0))
+    (Doc
+      (Type "COrSchematicDoc")
+      (Frame
+        (Placement "44 0 1 -1 -1 -1 -1 5 1210 24 755")
+        (Scroll "480 330")
+        (Zoom "100")
+        (Occurrence "/"))
+      (Path
+         "D:\2_PROJECTS\5_FLAMEDETECTOR\1_FW\10_SCHEMATIC\20_UVIR\GTF-1100_UVIR_REV0.3_20170803.DSN")
+      (Schematic "SCHEMATIC1")
+      (Page "01. UV/IR Sensing")))
+  (PartMRUSelector))

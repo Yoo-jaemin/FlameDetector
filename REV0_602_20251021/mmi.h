@@ -1,0 +1,195 @@
+/*
+*******************************************************************************
+* COPYRIGHT (c) 1992-2012 GASTRON Co.,Ltd. All rights reserved.
+*******************************************************************************
+* Model Name	: GTF-1100 Series
+* Module name	: 
+* Description	: 
+* Version		: REV 0.51
+* Start Date	: 2017.01.17
+* Modify Date	: 2018.06.14
+* C-Compiler	: avr-gcc
+* MPU			: ATmega1281
+* Written by	: Min-Sung, Kang (mskang@gastron.com)
+*******************************************************************************
+*/
+
+#ifndef __mmi_h__
+#define __mmi_h__
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define IR_WAR_BIT							0x01
+#define IR_DET_BIT							0x04
+#define UV_WAR_BIT							0x02
+#define UV_DET_BIT							0x08
+#define IR_OFFSET_FAULT_BIT					0x10
+#define BIT_FAULT_BIT						0x20
+#define PWR_FAULT_BIT						0x40
+#define EEP_FAULT_BIT						0x80
+
+#define WARM_UP_TIME						175 // 175 * 40ms = 7sec.
+#define FLAME_BUFF_SIZE						3
+#define DETECTION_CNT_MAX					999
+
+#define FLAME_STATE_MAINTAIN_TIME			5 // second
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+enum {
+	DTYPE_UVIR = 0,
+	DTYPE_TRIPLE,
+};
+
+enum { //Flame Type
+	HYDROCARBON = 0,
+	NON_HYDROCARBON,
+	FTYPE_MAX,
+};
+
+enum {
+	DET_DISTANCE_18M = 0,
+	DET_DISTANCE_36M,
+	DET_DISTANCE_48M,
+	DET_DISTANCE_60M,
+};
+
+enum {
+	LMODE_NO = 0,
+	LMODE_SCOPE,
+	LMODE_RAW,
+	LMODE_CALCULATED,
+	LMODE_UV_ONLY
+};
+
+enum {
+	ALARM_STATE_NO = 0,
+	ALARM_STATE_BIT_PROGRESS,
+	ALARM_STATE_WARNING,
+	ALARM_STATE_IR,
+	ALARM_STATE_UV,
+	ALARM_STATE_FLAME,
+	ALARM_STATE_PWR_FAULT,
+	ALARM_STATE_BIT_FAULT,
+	ALARM_STATE_IR_OFFSET_FAULT,
+	ALARM_STATE_EEP_FAULT
+};
+
+enum {
+	BIT_MODE_OFF = 0,
+	BIT_MODE_AUTO,
+	BIT_MODE_MANUAL
+};
+
+enum {
+	BIT_STATE_IDLE = 0,
+	BIT_STATE_PROGRESS,
+	BIT_STATE_RETRY,
+	BIT_STATE_DECISION
+};
+
+enum {
+	IR_WL_430 = 0,
+	IR_WL_395,
+	IR_WL_530,
+	IR_WL_MAX
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+typedef enum {
+	FMODE_WARM_UP = 0,
+	FMODE_NORMAL
+	
+}MMI_MODE;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+typedef struct {
+	
+	U16		IrLoFreq[IR_WL_MAX];
+	//U16		IrLoFreqAddCnt[IR_WL_MAX];
+	U16		IrLoTime[IR_WL_MAX];
+	double	IrLoPeak[IR_WL_MAX];
+	double	IrLoAvrg[IR_WL_MAX];
+		
+	U16		IrHiFreq[IR_WL_MAX];
+	//U16		IrHiFreqAddCnt[IR_WL_MAX];
+	U16		IrHiTime[IR_WL_MAX];
+	double	IrHiPeak[IR_WL_MAX];
+	double	IrHiAvrg[IR_WL_MAX];
+	
+	U16		IrFreqDv[IR_WL_MAX];
+	U16		IrTimeDv[IR_WL_MAX];
+	
+	double	Ir1sAvrg[IR_WL_MAX];
+	double	Ir1sAvrgDv[IR_WL_MAX];
+	double	Ir1sPtoP[IR_WL_MAX];
+	double	IrAvPtoP[IR_WL_MAX];
+	double	IrAvPtoPDv[IR_WL_MAX];
+	U16		IrSize[IR_WL_MAX];
+	U16		IrSizeRoc[IR_WL_MAX];
+		
+	double	IrRelRatio[IR_WL_MAX];
+	double	IrRatioLmt[IR_WL_MAX];
+	
+	U16		IrDirCntSum[IR_WL_MAX];
+	U16		IrFreqDirCntSum[IR_WL_MAX];
+	U16		IrWidestTimeSum[IR_WL_MAX];
+	U16		IrTimeDvSum[IR_WL_MAX];
+	//double	IrPeakDvSum[IR_WL_MAX];
+	double	IrSizeDvPer[IR_WL_MAX];
+	double	IrPtoPDvPer[IR_WL_MAX];
+	
+	U8		IrLmtOffset[IR_WL_MAX];
+	
+	U8		UvZrCnt;
+	U8		UvDvCnt;
+	U8		UvZrCntDv;
+	U8		UvDvCntDv;
+	U16		UvRawMax;
+	U16		UvCpsRaw;
+	double	UvCpsRes;
+	double	UvCpsItg;
+	U16		UvCpsRoc;
+	U32		UvCpmRaw;
+	
+	U8		IrFtFlag;
+	U8		UvFtFlag;
+	
+	U8		IrCnt;
+	U8		UvCnt;
+	
+}FLAME_HandleTypeDef;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+extern MMI_MODE					mmi_mode;
+extern FLAME_HandleTypeDef		Flame[];
+extern U8						DeviceType, FlameType, DetDistance, LogMode, AlarmState;
+extern U8						AlarmLatch, AlarmRelayMode, TroubleRelayMode;
+extern U8						WarmUpTime;
+extern U16						FlameCnt;
+extern U8						FlameRawFifoHp, FlameRawFifoTp;
+extern U16						BIT_Period, BIT_Runtime, BIT_Fault_Cnt, BIT_Retry_Lmt;
+extern U16						BIT_Retry_Cnt, BIT_Event_Cnt, PWR_Event_Cnt, BIT_Event_UvFinishTime;
+extern U8						BIT_Status, BIT_Mode;
+extern U16						IrScopeModeFifo[IR_WL_MAX][32], UvScopeModeFifo[32];
+extern U8						ScopeModeFifoHp;
+
+extern U8 FlameDetDelay_Sec;	// jmyoo  
+extern U16 AlramCnt;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+extern void Initialize_System( void );
+extern void ScopeMode_Log_Handler( void );
+extern void Flame_Detection_Handler( void );
+extern void LED_Indicator( void );
+extern void BIT_Start( void );
+extern void BIT_Drive( void );
+extern void External_BIT_Scan( void );
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#endif // __mmi_h__

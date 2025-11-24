@@ -1,0 +1,98 @@
+#include <avr/interrupt.h>
+#include <avr/io.h>
+#include <avr/pgmspace.h>
+
+#include "global.h"
+#include "dbg_printf.h"
+
+#include "adc.h"
+#include "gpio.h"
+#include "timer.h"
+#include "eeprom.h"
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+U16	ADbuf[AD_BUF_SIZE], MinTemp_LogCnt, MaxTemp_LogCnt;
+double	fADBuf[4],PUV, P24, Tempareture, MinTemp, MaxTemp;
+
+float	f_ad_ma_a;
+float	f_ad_ma_b;
+float	ad_ma_calc_data;
+float	x1,x2,y1,y2 = 0;;
+U16	Det_Analog_Data;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Initialize_ADC( void )
+{
+	//ADMUX = 0xC3;
+	ADMUX = 0x43;
+	ADCSRA = 0x8F;
+	ADCSRB = 0x00;
+	DIDR0 = 0xFF;
+
+	ADC_Factor();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ISR( ADC_vect )
+{
+	switch( ADMUX ){
+		case 0x40: // Det mA
+			ADbuf[0] = ADCW;
+			//ADMUX = 0xC1;
+			ADMUX = 0x41;
+			break;
+			
+		case 0x41: // aP24
+			ADbuf[1] = ADCW;
+			//ADMUX = 0xC2;
+			ADMUX = 0x42;
+			break;
+			
+		case 0x42: // aPOUT
+			ADbuf[2] = ADCW;
+			//ADMUX = 0xC3;
+			ADMUX = 0x43;
+			break;
+			
+		case 0x43: // aTEMP
+			ADbuf[3] = ADCW;
+			//ADMUX = 0xC0;
+			ADMUX = 0x40;
+			break;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void ADC_Task( void )
+{
+	if( sTimerFlag[TMR_ADC_TASK] ){
+		sTimerFlag[TMR_ADC_TASK] = 0;
+		
+		fADBuf[0] = fADBuf[0] * 0.97 + ADbuf[0] * 0.03;
+		fADBuf[1] = fADBuf[1] * 0.97 + ADbuf[1] * 0.03;
+		fADBuf[2] = fADBuf[2] * 0.97 + ADbuf[2] * 0.03;
+		fADBuf[3] = fADBuf[3] * 0.97 + ADbuf[3] * 0.03;
+		
+		Det_Analog_Data = (f_ad_ma_a * fADBuf[0]) + f_ad_ma_b;
+		
+		//DPRINT4("a = %f, b = %f, d = %d, D = %d\n", f_ad_ma_a, f_ad_ma_b, ADbuf[0], Det_Analog_Data);
+		//DPRINT4("a = %f, b = %f, d = %f, D = %d\n", f_ad_ma_a, f_ad_ma_b, fADBuf[0], Det_Analog_Data);
+		//DPRINT2("d = %f, D = %d\n", fADBuf[0], Det_Analog_Data);
+		//DPRINT2("d = %f, D = %x\n", fADBuf[0], ADbuf[0]);
+	}
+}
+
+void ADC_Factor(void)
+{
+	x1 = epr_sm[EEP_4mA_Data];
+	x2 = epr_sm[EEP_20mA_Data];
+	
+	y1 = 400;
+	y2 = 2000;
+	
+	f_ad_ma_a = (float)((y2-y1) / (x2 - x1));
+	f_ad_ma_b = (float)(((y2*x1) - (y1*x2))/(x1-x2));
+
+	//DPRINT2("a = %f, b = %f\n", f_ad_ma_a, f_ad_ma_b);
+}

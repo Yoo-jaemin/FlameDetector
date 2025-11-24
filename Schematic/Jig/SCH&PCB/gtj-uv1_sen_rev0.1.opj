@@ -1,0 +1,62 @@
+(ExpressProject ""
+  (ProjectVersion "19981106")
+  (SoftwareVersion "17.4-2019 P001 (3823098) [10/7/2019]-[04/06/23]")
+  (ProjectType "PCB")
+  (Folder "Design Resources"
+    (Folder "Library")
+    (File ".\gtj-uv1_sen_rev0.1.dsn"
+      (Type "Schematic Design"))
+    (BuildFileAddedOrDeleted "x")
+    (CompileFileAddedOrDeleted "x")
+    (NoModify)
+    (DOCKED "TRUE")
+    (DOCKING_POSITION "59420"))
+  (Folder "Layout")
+  (Folder "Outputs")
+  (Folder "Referenced Projects")
+  (PartMRUSelector)
+  (GlobalState
+    (FileView
+      (Path "Design Resources")
+      (Path "Design Resources" ".\gtj-uv1_sen_rev0.1.dsn")
+      (Path "Design Resources" ".\gtj-uv1_sen_rev0.1.dsn" "SENSOR")
+      (Select "Design Resources" ".\gtj-uv1_sen_rev0.1.dsn" "SENSOR"
+         "01. IR Sensing"))
+    (HierarchyView)
+    (Doc
+      (Type "COrCapturePMDoc")
+      (Frame
+        (Placement "44 2 3 -1 -1 0 0 0 200 0 150"))
+      (Tab 0))
+    (Doc
+      (Type "COrSchematicDoc")
+      (Frame
+        (Placement "44 0 1 -1 -1 -1 -1 5 1674 24 741")
+        (Scroll "0 0")
+        (Zoom "100")
+        (Occurrence "/"))
+      (Path
+         "D:\2_PROJECTS\5_FLAMEDETECTOR\1_FW\SCHEMATIC\JIG\SCH&PCB\GTJ-UV1_SEN_REV0.1.DSN")
+      (Schematic "SENSOR")
+      (Page "00. INDEX"))
+    (Doc
+      (Type "COrSchematicDoc")
+      (Frame
+        (Placement "44 0 1 -1 -1 -1 -1 5 1674 24 741")
+        (Scroll "0 0")
+        (Zoom "100")
+        (Occurrence "/"))
+      (Path
+         "D:\2_PROJECTS\5_FLAMEDETECTOR\1_FW\SCHEMATIC\JIG\SCH&PCB\GTJ-UV1_SEN_REV0.1.DSN")
+      (Schematic "SENSOR")
+      (Page "01. IR Sensing")))
+  (Folder "PSpice Resources"
+    (Folder "Simulation Profiles")
+    (Folder "Model Libraries"
+      (Sort User))
+    (Folder "Stimulus Files"
+      (Sort User))
+    (Folder "Include Files"
+      (Sort User)))
+  (Folder "Logs")
+  (MPSSessionName "jasan1-380"))

@@ -1,0 +1,8 @@
+#ifndef __poterntiometer_H__
+#define __poterntiometer_H__
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+extern void Initialize_Potentiometer( void );
+extern U8 Potentiometer_Wr( U8 addr, U8 data);
+
+#endif // __poterntiometer_H__

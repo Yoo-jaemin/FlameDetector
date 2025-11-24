@@ -1,0 +1,75 @@
+/*
+*******************************************************************************
+* COPYRIGHT (c) 1992-2012 GASTRON Co.,Ltd. All rights reserved.
+*******************************************************************************
+* Model Name	: GTF-1100 Series
+* Module name	: 
+* Description	: 
+* Version		: REV 0.51
+* Start Date	: 2017.01.17
+* Modify Date	: 2018.06.14
+* C-Compiler	: avr-gcc
+* MPU			: ATmega1281
+* Written by	: Min-Sung, Kang (mskang@gastron.com)
+*******************************************************************************
+*/
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#ifndef __gpio_H__
+#define __gpio_H__
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#include <avr/io.h>
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Test Point
+#define TP10_AIC_H()			(PORTA |= BIT3)
+#define TP10_AIC_L()			(PORTA &= ~BIT3)
+#define TP10_AIC_T()			(PORTA ^= BIT3)
+
+#define TP11_AIC_H()			(PORTA |= BIT2)
+#define TP11_AIC_L()			(PORTA &= ~BIT2)
+#define TP11_AIC_T()			(PORTA ^= BIT2)
+
+#define TP12_AIC_H()			(PORTG |= BIT0)
+#define TP12_AIC_L()			(PORTG &= ~BIT0)
+#define TP12_AIC_T()			(PORTG ^= BIT0)
+
+#define TP13_AIC_H()			(PORTH |= BIT7)
+#define TP13_AIC_L()			(PORTH &= ~BIT7)
+#define TP13_AIC_T()			(PORTH ^= BIT7)
+
+#define TP3_H()				(PORTG |= BIT5)
+#define TP3_L()				(PORTG &= ~BIT5)
+#define TP3_T()				(PORTG ^= BIT5)
+
+#define TP4_H()				(PORTC |= BIT7)
+#define TP4_L()				(PORTC &= ~BIT7)
+#define TP4_T()				(PORTC ^= BIT7)
+
+#define TP5_H()				(PORTH |= BIT7)
+#define TP5_L()				(PORTH &= ~BIT7)
+#define TP5_T()				(PORTH ^= BIT7)
+
+#define DET_LED_ON()			(PORTL |= BIT7) 
+#define DET_LED_OFF()			(PORTL &= ~BIT7)
+#define DET_LED_T()			(PORTL ^= BIT7) 
+
+#define MODBUS_DIR_RX()			(PORTH &= ~BIT2)
+#define MODBUS_DIR_TX()			(PORTH |=  BIT2)
+
+#define RS485_DIR_RX()			(PORTH &= ~BIT3)
+#define RS485_DIR_TX()			(PORTH |=  BIT3)
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+extern void Initialize_GPIO(void);
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#endif // __gpio_H__

@@ -1,0 +1,1024 @@
+#include <stdio.h>
+#include <string.h>
+
+#include <avr/io.h>
+#include <math.h>
+#include <stdlib.h>
+
+#include "global.h"
+#include "dbg_printf.h"
+
+#include "version.h"
+#include "mmi.h"
+#include "lcd.h"
+#include "timer.h"
+#include "uart2560.h"
+#include "mkey.h"
+#include "modbus.h"
+#include "adc.h"
+#include "gpio.h"
+#include "uart2560.h"
+
+//MMI_MODE	mmi_mode;
+U16	mmi_mode, mmi_mode_old;
+U8	det_input_reg_data_old;
+U16	det_status_data_arry[2][5];
+U8	bit_operation;
+U16	ModeSetFlow[FMODE_MAX];
+U16	ModeSetTime[FMODE_MAX];
+U16	ModeSetFlag[FMODE_MAX];
+
+void Initialize_ModeFlag(void);
+
+
+const S16 	DET_EEP_SYS_DEFAULT[]PROGMEM =
+{
+	0x1234,                          
+	0,                               			// EEP_CHECKSUM,				// 40002 (001)	// EEP_CHECKSUM
+	0,//EEPROM_MARKING,                  			// EEP_PREFIX,					// 40003 (002)	// EEP_PREFIX
+	0,                               			// EEP_SERIAL_NO_L,				// 40004 (003)	// EEP_SERIAL_NO_L
+	0,                               			// EEP_SERIAL_NO_H,				// 40005 (004)	// EEP_SERIAL_NO_H
+	0,//LMODE_NO,                        			// EEP_LOG_MODE,				// 40006 (005)	// EEP_LOG_MODE
+	0,//BIT_MODE_AUTO,                   			// EEP_BIT_MODE,				// 40007 (006)	// EEP_BIT_MODE
+	1,                               			// EEP_UV_PWR_CTRL,				// 40008 (007)	// EEP_UV_PWR_CTRL
+	0,                               			// EEP_ALM_RLY_OPERATION,			// 40009 (008)	// EEP_ALM_RLY_OPERATION
+	1,                               			// EEP_TRB_RLY_OPERATION,			// 40010 (009)	// EEP_TRB_RLY_OPERATION
+	0,                                			// EEP_RESERVED_010,				// 40011 (010)        
+	0,                                			// EEP_RESERVED_011,				// 40012 (011)        
+	0,                                			// EEP_RESERVED_012,				// 40013 (012)        
+	0,                                			// EEP_RESERVED_013,				// 40014 (013)        
+	0,                                			// EEP_RESERVED_014,				// 40015 (014)        
+	0,                                			// EEP_RESERVED_015,				/ 40016 (015)        
+	2400,                            			// EEP_UVIR_IR_VOLT_LMT_L,			// 40017 (016)	// EEP_UVIR_IR_VOLT_LMT_L
+	2600,                            			// EEP_UVIR_IR_VOLT_LMT_H,			// 40018 (017)	// EEP_UVIR_IR_VOLT_LMT_H
+	38,                              			// EEP_UVIR_IR_SIZE_LMT,			// 40019 (018)	// EEP_UVIR_IR_SIZE_LMT
+	2400,                            			// EEP_TRIP_IR_VOLT_LMT_L,			// 40020 (019)	// EEP_TRIP_IR_VOLT_LMT_L
+	2600,                            			// EEP_TRIP_IR_VOLT_LMT_H,			// 40021 (020)	// EEP_TRIP_IR_VOLT_LMT_H
+	34,                              			// EEP_TRIP_IR_SIZE_LMT,			// 40022 (021)	// EEP_TRIP_IR_SIZE_LMT
+	100,                             			// EEP_TRIPMODE_IR_TIME_DV_LMT,			// 40023 (022)	// EEP_TRIPMODE_IR_TIME_DV_LMT
+	60,                              			// EEP_BIT_PERIOD,				// 40024 (023)	// EEP_BIT_PERIOD
+	9,                               			// EEP_BIT_RETRY_LMT,				// 40025 (024)	// EEP_BIT_RETRY_LMT
+	0,                                			// EEP_RESERVED_025,				// 40026 (025)        
+	0,                                			// EEP_RESERVED_026,				// 40027 (026)        
+	0,                                			// EEP_RESERVED_027,				// 40028 (027)        
+	0,                                			// EEP_RESERVED_028,				// 40029 (028)        
+	0,                                			// EEP_RESERVED_029,				// 40030 (029)        
+	0,                                			// EEP_RESERVED_030,				// 40031 (030)        
+	0,                                			// EEP_RESERVED_031,				// 40032 (031)        
+	7,                               			// EEP_IR_PULSE_WIDTH_LMT,			// 40033 (032)	// EEP_IR_PULSE_WIDTH_LMT
+	150,                             			// EEP_IR_FLICKER_CPS_REF_LMT,			// 40034 (033)	// EEP_IR_FLICKER_CPS_REF_LMT
+	0,//IR_FLICKER_FACTOR*10000,         			// EEP_IR_FLICKER_FACTOR,			// 40035 (034)	// EEP_IR_FLICKER_FACTOR
+	0,//IR_TIME_DV_LMT_IN_FREQ_SAME,     			// EEP_IR_TIME_DV_LMT_IN_FREQ_SAME,		// 40036 (035)	// EEP_IR_TIME_DV_LMT_IN_FREQ_SAME
+	25,                              			// EEP_IR_1SAV_DV_LMT_IN_FREQ_SAME,		// 40037 (036)	// EEP_IR_1SAV_DV_LMT_IN_FREQ_SAME
+	10,                              			// EEP_IR_SIZE_DV_LMT_IN_FREQ_SAME,		// 40038 (037)	// EEP_IR_SIZE_DV_LMT_IN_FREQ_SAME
+	30,                              			// EEP_IR_LOW_SIZE_LMT_CPS_REF,			// 40039 (038)	// EEP_IR_LOW_SIZE_LMT_CPS_REF
+	100,                             			// EEP_IR_LOW_SIZE_LMT,				// 40040 (039)	// EEP_IR_LOW_SIZE_LMT
+	1700,                            			// EEP_IR_1S_AVRG_DV_OVER_LMT,			// 40041 (040)	// EEP_IR_1S_AVRG_DV_OVER_LMT
+	300,                             			// EEP_IR_BIT_THRESHOLD_VOLT,			// 40042 (041)	// EEP_IR_BIT_THRESHOLD_VOLT
+	250,                             			// EEP_IR_ROC_LMT,				// 40043 (042)	// EEP_IR_ROC_LMT
+	0,                               			// EEP_IR_REL_RATIO_LMT_CORR_VAL,		// 40044 (043)	// EEP_IR_REL_RATIO_LMT_CORR_VAL
+	0,                                			// EEP_RESERVED_044,				// 40045 (044)        
+	0,                                			// EEP_RESERVED_045,				// 40046 (045)        
+	0,                                			// EEP_RESERVED_046,				// 40047 (046)        
+	0,                                			// EEP_RESERVED_047,				// 40048 (047)        
+	0,//UV_ZERO_DEV_CNT_LMT,             			// EEP_UV_ZERO_DEV_CNT_LMT,			// 40049 (048)	// EEP_UV_ZERO_DEV_CNT_LMT
+	0,//UV_ZERO_CNT_LMT_CPS_REF,         			// EEP_UV_ZERO_CNT_LMT_CPS_REF,			// 40050 (049)	// EEP_UV_ZERO_CNT_LMT_CPS_REF
+	0,//UV_ZERO_CNT_LMT,                 			// EEP_UV_ZERO_CNT_LMT,				// 40051 (050)	// EEP_UV_ZERO_CNT_LMT
+	0,//UV_ROC_LMT_CPS_REF,              			// EEP_UV_ROC_LMT_CPS_REF,			// 40052 (051)	// EEP_UV_ROC_LMT_CPS_REF
+	0,//UV_ROC_LMT,                      			// EEP_UV_ROC_LMT,				// 40053 (052)	// EEP_UV_ROC_LMT
+	5,                               			// EEP_UV_BIT_THRESHOLD_CPS,			// 40054 (053)	// EEP_UV_BIT_THRESHOLD_CPS
+	0,                               			// EEP_UV_BIT_FINISH_TIME,			// 40055 (054)	// EEP_UV_BIT_FINISH_TIME
+	0,//UV_ZERO_CNT_DEV_LMT,             			// EEP_UV_ZERO_CNT_DEV_LMT,			// 40056 (055)	// EEP_UV_ZERO_CNT_DEV_LMT
+	0,                                			// EEP_RESERVED_056,				// 40057 (056)        
+	0,                                			// EEP_RESERVED_057,				// 40058 (057)        
+	0,                                			// EEP_RESERVED_058,				// 40059 (058)        
+	0,                                			// EEP_RESERVED_059,				// 40060 (059)        
+	4000,                            			// EEP_ANALOG_04MA,				// 40061 (060)        
+	20000,                           			// EEP_ANALOG_20MA,				// 40062 (061)        
+	1200,//UV_DET_LIMIT*1000,               			// EEP_CAL_UV_DET_LMT,				// 40063 (062)	// EEP_CAL_UV_DET_LMT
+	100,                             			// EEP_CAL_BUF_UV_CPS,				// 40064 (063)	// EEP_CAL_BUF_UV_CPS
+	85,                              			// EEP_CAL_VAL_UV_CPS,				// 40065 (064)	// EEP_CAL_VAL_UV_CPS
+	1900,                            			// EEP_CAL_BUF_IR430_RESPONSIVITY,		// 40066 (065)	// EEP_CAL_BUF_IR430_RESPONSIVITY
+	1900,                            			// EEP_CAL_BUF_IR395_RESPONSIVITY,		// 40067 (066)
+	1900,                            			// EEP_CAL_BUF_IR530_RESPONSIVITY,		// 40068 (067)
+	450,                             			// EEP_CAL_BUF_IR430_01,			// 40069 (068)	// EEP_CAL_BUF_IR430_01
+	1073,                            			// EEP_CAL_BUF_IR430_02,			// 40070 (069)	// EEP_CAL_BUF_IR430_02
+	1733,                            			// EEP_CAL_BUF_IR430_03,			// 40071 (070)	// EEP_CAL_BUF_IR430_03
+	2474,                            			// EEP_CAL_BUF_IR430_04,			// 40072 (071)	// EEP_CAL_BUF_IR430_04
+	3249,                            			// EEP_CAL_BUF_IR430_05,			// 40073 (072)	// EEP_CAL_BUF_IR430_05
+	3909,                            			// EEP_CAL_BUF_IR430_06,			// 40074 (073)	// EEP_CAL_BUF_IR430_06
+	4905,                            			// EEP_CAL_BUF_IR430_07,			// 40075 (074)	// EEP_CAL_BUF_IR430_07
+	429,                             			// EEP_CAL_BUF_IR395_01,			// 40076 (075)	// EEP_CAL_BUF_IR395_01
+	1006,                            			// EEP_CAL_BUF_IR395_02,			// 40077 (076)	// EEP_CAL_BUF_IR395_02
+	2114,                            			// EEP_CAL_BUF_IR395_03,			// 40078 (077)	// EEP_CAL_BUF_IR395_03
+	2802,                            			// EEP_CAL_BUF_IR395_04,			// 40079 (078)	// EEP_CAL_BUF_IR395_04
+	3322,                            			// EEP_CAL_BUF_IR395_05,			// 40080 (079)	// EEP_CAL_BUF_IR395_05
+	3980,                            			// EEP_CAL_BUF_IR395_06,			// 40081 (080)	// EEP_CAL_BUF_IR395_06
+	4860,                            			// EEP_CAL_BUF_IR395_07,			// 40082 (081)	// EEP_CAL_BUF_IR395_07
+	542,                             			// EEP_CAL_BUF_IR530_01,			// 40083 (082)	// EEP_CAL_BUF_IR530_01
+	1293,                            			// EEP_CAL_BUF_IR530_02,			// 40084 (083)	// EEP_CAL_BUF_IR530_02
+	1844,                            			// EEP_CAL_BUF_IR530_03,			// 40085 (084)	// EEP_CAL_BUF_IR530_03
+	2751,                            			// EEP_CAL_BUF_IR530_04,			// 40086 (085)	// EEP_CAL_BUF_IR530_04
+	3311,                            			// EEP_CAL_BUF_IR530_05,			// 40087 (086)	// EEP_CAL_BUF_IR530_05
+	4166,                            			// EEP_CAL_BUF_IR530_06,			// 40088 (087)	// EEP_CAL_BUF_IR530_06
+	4877,                            			// EEP_CAL_BUF_IR530_07,			// 40089 (088)	// EEP_CAL_BUF_IR530_07
+	90,                              			// EEP_CAL_VAL_IR430_01,			// 40090 (089)	// EEP_CAL_VAL_IR430_01
+	215,                             			// EEP_CAL_VAL_IR430_02,			// 40091 (090)	// EEP_CAL_VAL_IR430_02
+	347,                             			// EEP_CAL_VAL_IR430_03,			// 40092 (091)	// EEP_CAL_VAL_IR430_03
+	495,                             			// EEP_CAL_VAL_IR430_04,			// 40093 (092)	// EEP_CAL_VAL_IR430_04
+	650,                             			// EEP_CAL_VAL_IR430_05,			// 40094 (093)	// EEP_CAL_VAL_IR430_05
+	783,                             			// EEP_CAL_VAL_IR430_06,			// 40095 (094)	// EEP_CAL_VAL_IR430_06
+	982,                             			// EEP_CAL_VAL_IR430_07,			// 40096 (095)	// EEP_CAL_VAL_IR430_07
+	86,                              			// EEP_CAL_VAL_IR395_01,			// 40097 (096)	// EEP_CAL_VAL_IR395_01
+	201,                             			// EEP_CAL_VAL_IR395_02,			// 40098 (097)	// EEP_CAL_VAL_IR395_02
+	423,                             			// EEP_CAL_VAL_IR395_03,			// 40099 (098)	// EEP_CAL_VAL_IR395_03
+	561,                             			// EEP_CAL_VAL_IR395_04,			// 40100 (099)	// EEP_CAL_VAL_IR395_04
+	665,                             			// EEP_CAL_VAL_IR395_05,			// 40101 (100)	// EEP_CAL_VAL_IR395_05
+	797,                             			// EEP_CAL_VAL_IR395_06,			// 40102 (101)	// EEP_CAL_VAL_IR395_06
+	973,                             			// EEP_CAL_VAL_IR395_07,			// 40103 (102)	// EEP_CAL_VAL_IR395_07
+	109,                             			// EEP_CAL_VAL_IR530_01,			// 40104 (103)	// EEP_CAL_VAL_IR530_01
+	259,                             			// EEP_CAL_VAL_IR530_02,			// 40105 (104)	// EEP_CAL_VAL_IR530_02
+	369,                             			// EEP_CAL_VAL_IR530_03,			// 40106 (105)	// EEP_CAL_VAL_IR530_03
+	551,                             			// EEP_CAL_VAL_IR530_04,			// 40107 (106)	// EEP_CAL_VAL_IR530_04
+	663,                             			// EEP_CAL_VAL_IR530_05,			// 40108 (107)	// EEP_CAL_VAL_IR530_05
+	834,                             			// EEP_CAL_VAL_IR530_06,			// 40109 (108)	// EEP_CAL_VAL_IR530_06
+	976,                             			// EEP_CAL_VAL_IR530_07,			// 40110 (109)	// EEP_CAL_VAL_IR530_07
+	5000,                            			// EEP_EVT_BIT_IR430_1S_PTOP_MIN,		// 40225 (224)	// EEP_EVT_BIT_IR430_1S_PTOP_MIN
+	5000,                            			// EEP_EVT_BIT_IR395_1S_PTOP_MIN,		// 40226 (225)	// EEP_EVT_BIT_IR395_1S_PTOP_MIN
+	5000,                            			// EEP_EVT_BIT_IR530_1S_PTOP_MIN,		// 40227 (226)	// EEP_EVT_BIT_IR530_1S_PTOP_MIN
+	0,                               			// EEP_EVT_BIT_RETRY_CNT,			// 40228 (227)	// EEP_EVT_BIT_RETRY_CNT
+	0,                               			// EEP_EVT_BIT_FAULT_CNT,			// 40229 (228)	// EEP_EVT_BIT_FAULT_CNT
+	0,                               			// EEP_EVT_PWR_FAULT_CNT,			// 40230 (229)	// EEP_EVT_PWR_FAULT_CNT
+	1250,                            			// EEP_EVT_MIN_TEMP,				// 40231 (230)	// EEP_EVT_MIN_TEMP
+	-400,                            			// EEP_EVT_MAX_TEMP,				// 40232 (231)	// EEP_EVT_MAX_TEMP
+	0,                               			// EEP_EVT_CPS_RAW_MAX,				// 40233 (232)	// EEP_EVT_CPS_RAW_MAX
+	0,                               			// EEP_EVT_CPS_ITG_MAX,				// 40234 (233)	// EEP_EVT_CPS_ITG_MAX
+	0,                               			// EEP_EVT_IR430_LO_FREQ_BF_3S,			// 40117 (116)	// EEP_EVT_IR430_LO_FREQ_BF_3S
+	0,                               			// EEP_EVT_IR430_LO_TIME_BF_3S,			// 40118 (117)	// EEP_EVT_IR430_LO_TIME_BF_3S
+	0,                               			// EEP_EVT_IR430_LO_PEAK_BF_3S,			// 40119 (118)	// EEP_EVT_IR430_LO_PEAK_BF_3S
+	0,                               			// EEP_EVT_IR430_LO_AVRG_BF_3S,			// 40120 (119)	// EEP_EVT_IR430_LO_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR430_HI_FREQ_BF_3S,			// 40121 (120)	// EEP_EVT_IR430_HI_FREQ_BF_3S
+	0,                               			// EEP_EVT_IR430_HI_TIME_BF_3S,			// 40122 (121)	// EEP_EVT_IR430_HI_TIME_BF_3S
+	0,                               			// EEP_EVT_IR430_HI_PEAK_BF_3S,			// 40123 (122)	// EEP_EVT_IR430_HI_PEAK_BF_3S
+	0,                               			// EEP_EVT_IR430_HI_AVRG_BF_3S,			// 40124 (123)	// EEP_EVT_IR430_HI_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR430_1S_AVRG_BF_3S,			// 40125 (124)	// EEP_EVT_IR430_1S_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR430_1S_PTOP_BF_3S,			// 40126 (125)	// EEP_EVT_IR430_1S_PTOP_BF_3S
+	0,                               			// EEP_EVT_IR430_AV_PTOP_BF_3S,			// 40127 (126)	// EEP_EVT_IR430_AV_PTOP_BF_3S
+	0,                               			// EEP_EVT_IR430_IR_SIZE_BF_3S,			// 40128 (127)	// EEP_EVT_IR430_IR_SIZE_BF_3S
+	0,                               			// EEP_EVT_IR430_LO_FREQ_BF_2S,			// 40129 (128)	// EEP_EVT_IR430_LO_FREQ_BF_2S
+	0,                               			// EEP_EVT_IR430_LO_TIME_BF_2S,			// 40130 (129)	// EEP_EVT_IR430_LO_TIME_BF_2S
+	0,                               			// EEP_EVT_IR430_LO_PEAK_BF_2S,			// 40131 (130)	// EEP_EVT_IR430_LO_PEAK_BF_2S
+	0,                               			// EEP_EVT_IR430_LO_AVRG_BF_2S,			// 40132 (131)	// EEP_EVT_IR430_LO_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR430_HI_FREQ_BF_2S,			// 40133 (132)	// EEP_EVT_IR430_HI_FREQ_BF_2S
+	0,                               			// EEP_EVT_IR430_HI_TIME_BF_2S,			// 40134 (133)	// EEP_EVT_IR430_HI_TIME_BF_2S
+	0,                               			// EEP_EVT_IR430_HI_PEAK_BF_2S,			// 40135 (134)	// EEP_EVT_IR430_HI_PEAK_BF_2S
+	0,                               			// EEP_EVT_IR430_HI_AVRG_BF_2S,			// 40136 (135)	// EEP_EVT_IR430_HI_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR430_1S_AVRG_BF_2S,			// 40137 (136)	// EEP_EVT_IR430_1S_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR430_1S_PTOP_BF_2S,			// 40138 (137)	// EEP_EVT_IR430_1S_PTOP_BF_2S
+	0,                               			// EEP_EVT_IR430_AV_PTOP_BF_2S,			// 40139 (138)	// EEP_EVT_IR430_AV_PTOP_BF_2S
+	0,                               			// EEP_EVT_IR430_IR_SIZE_BF_2S,			// 40140 (139)	// EEP_EVT_IR430_IR_SIZE_BF_2S
+	0,                               			// EEP_EVT_IR430_LO_FREQ_BF_1S,			// 40141 (140)	// EEP_EVT_IR430_LO_FREQ_BF_1S
+	0,                               			// EEP_EVT_IR430_LO_TIME_BF_1S,			// 40142 (141)	// EEP_EVT_IR430_LO_TIME_BF_1S
+	0,                               			// EEP_EVT_IR430_LO_PEAK_BF_1S,			// 40143 (142)	// EEP_EVT_IR430_LO_PEAK_BF_1S
+	0,                               			// EEP_EVT_IR430_LO_AVRG_BF_1S,			// 40144 (143)	// EEP_EVT_IR430_LO_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR430_HI_FREQ_BF_1S,			// 40145 (144)	// EEP_EVT_IR430_HI_FREQ_BF_1S
+	0,                               			// EEP_EVT_IR430_HI_TIME_BF_1S,			// 40146 (145)	// EEP_EVT_IR430_HI_TIME_BF_1S
+	0,                               			// EEP_EVT_IR430_HI_PEAK_BF_1S,			// 40147 (146)	// EEP_EVT_IR430_HI_PEAK_BF_1S
+	0,                               			// EEP_EVT_IR430_HI_AVRG_BF_1S,			// 40148 (147)	// EEP_EVT_IR430_HI_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR430_1S_AVRG_BF_1S,			// 40149 (148)	// EEP_EVT_IR430_1S_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR430_1S_PTOP_BF_1S,			// 40150 (149)	// EEP_EVT_IR430_1S_PTOP_BF_1S
+	0,                               			// EEP_EVT_IR430_AV_PTOP_BF_1S,			// 40151 (150)	// EEP_EVT_IR430_AV_PTOP_BF_1S
+	0,                               			// EEP_EVT_IR430_IR_SIZE_BF_1S,			// 40152 (151)	// EEP_EVT_IR430_IR_SIZE_BF_1S
+	0,                               			// EEP_EVT_IR395_LO_FREQ_BF_3S,			// 40153 (152)	// EEP_EVT_IR395_LO_FREQ_BF_3S
+	0,                               			// EEP_EVT_IR395_LO_TIME_BF_3S,			// 40154 (153)	// EEP_EVT_IR395_LO_TIME_BF_3S
+	0,                               			// EEP_EVT_IR395_LO_PEAK_BF_3S,			// 40155 (154)	// EEP_EVT_IR395_LO_PEAK_BF_3S
+	0,                               			// EEP_EVT_IR395_LO_AVRG_BF_3S,			// 40156 (155)	// EEP_EVT_IR395_LO_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR395_HI_FREQ_BF_3S,			// 40157 (156)	// EEP_EVT_IR395_HI_FREQ_BF_3S
+	0,                               			// EEP_EVT_IR395_HI_TIME_BF_3S,			// 40158 (157)	// EEP_EVT_IR395_HI_TIME_BF_3S
+	0,                               			// EEP_EVT_IR395_HI_PEAK_BF_3S,			// 40159 (158)	// EEP_EVT_IR395_HI_PEAK_BF_3S
+	0,                               			// EEP_EVT_IR395_HI_AVRG_BF_3S,			// 40160 (159)	// EEP_EVT_IR395_HI_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR395_1S_AVRG_BF_3S,			// 40161 (160)	// EEP_EVT_IR395_1S_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR395_1S_PTOP_BF_3S,			// 40162 (161)	// EEP_EVT_IR395_1S_PTOP_BF_3S
+	0,                               			// EEP_EVT_IR395_AV_PTOP_BF_3S,			// 40163 (162)	// EEP_EVT_IR395_AV_PTOP_BF_3S
+	0,                               			// EEP_EVT_IR395_IR_SIZE_BF_3S,			// 40164 (163)	// EEP_EVT_IR395_IR_SIZE_BF_3S
+	0,                               			// EEP_EVT_IR395_LO_FREQ_BF_2S,			// 40165 (164)	// EEP_EVT_IR395_LO_FREQ_BF_2S
+	0,                               			// EEP_EVT_IR395_LO_TIME_BF_2S,			// 40166 (165)	// EEP_EVT_IR395_LO_TIME_BF_2S
+	0,                               			// EEP_EVT_IR395_LO_PEAK_BF_2S,			// 40167 (166)	// EEP_EVT_IR395_LO_PEAK_BF_2S
+	0,                               			// EEP_EVT_IR395_LO_AVRG_BF_2S,			// 40168 (167)	// EEP_EVT_IR395_LO_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR395_HI_FREQ_BF_2S,			// 40169 (168)	// EEP_EVT_IR395_HI_FREQ_BF_2S
+	0,                               			// EEP_EVT_IR395_HI_TIME_BF_2S,			// 40170 (169)	// EEP_EVT_IR395_HI_TIME_BF_2S
+	0,                               			// EEP_EVT_IR395_HI_PEAK_BF_2S,			// 40171 (170)	// EEP_EVT_IR395_HI_PEAK_BF_2S
+	0,                               			// EEP_EVT_IR395_HI_AVRG_BF_2S,			// 40172 (171)	// EEP_EVT_IR395_HI_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR395_1S_AVRG_BF_2S,			// 40173 (172)	// EEP_EVT_IR395_1S_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR395_1S_PTOP_BF_2S,			// 40174 (173)	// EEP_EVT_IR395_1S_PTOP_BF_2S
+	0,                               			// EEP_EVT_IR395_AV_PTOP_BF_2S,			// 40175 (174)	// EEP_EVT_IR395_AV_PTOP_BF_2S
+	0,                               			// EEP_EVT_IR395_IR_SIZE_BF_2S,			// 40176 (175)	// EEP_EVT_IR395_IR_SIZE_BF_2S
+	0,                               			// EEP_EVT_IR395_LO_FREQ_BF_1S,			// 40177 (176)	// EEP_EVT_IR395_LO_FREQ_BF_1S
+	0,                               			// EEP_EVT_IR395_LO_TIME_BF_1S,			// 40178 (177)	// EEP_EVT_IR395_LO_TIME_BF_1S
+	0,                               			// EEP_EVT_IR395_LO_PEAK_BF_1S,			// 40179 (178)	// EEP_EVT_IR395_LO_PEAK_BF_1S
+	0,                               			// EEP_EVT_IR395_LO_AVRG_BF_1S,			// 40180 (179)	// EEP_EVT_IR395_LO_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR395_HI_FREQ_BF_1S,			// 40181 (180)	// EEP_EVT_IR395_HI_FREQ_BF_1S
+	0,                               			// EEP_EVT_IR395_HI_TIME_BF_1S,			// 40182 (181)	// EEP_EVT_IR395_HI_TIME_BF_1S
+	0,                               			// EEP_EVT_IR395_HI_PEAK_BF_1S,			// 40183 (182)	// EEP_EVT_IR395_HI_PEAK_BF_1S
+	0,                               			// EEP_EVT_IR395_HI_AVRG_BF_1S,			// 40184 (183)	// EEP_EVT_IR395_HI_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR395_1S_AVRG_BF_1S,			// 40185 (184)	// EEP_EVT_IR395_1S_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR395_1S_PTOP_BF_1S,			// 40186 (185)	// EEP_EVT_IR395_1S_PTOP_BF_1S
+	0,                               			// EEP_EVT_IR395_AV_PTOP_BF_1S,			// 40187 (186)	// EEP_EVT_IR395_AV_PTOP_BF_1S
+	0,                               			// EEP_EVT_IR395_IR_SIZE_BF_1S,			// 40188 (187)	// EEP_EVT_IR395_IR_SIZE_BF_1S
+	0,                               			// EEP_EVT_IR530_LO_FREQ_BF_3S,			// 40189 (188)	// EEP_EVT_IR530_LO_FREQ_BF_3S
+	0,                               			// EEP_EVT_IR530_LO_TIME_BF_3S,			// 40190 (189)	// EEP_EVT_IR530_LO_TIME_BF_3S
+	0,                               			// EEP_EVT_IR530_LO_PEAK_BF_3S,			// 40191 (190)	// EEP_EVT_IR530_LO_PEAK_BF_3S
+	0,                               			// EEP_EVT_IR530_LO_AVRG_BF_3S,			// 40192 (191)	// EEP_EVT_IR530_LO_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR530_HI_FREQ_BF_3S,			// 40193 (192)	// EEP_EVT_IR530_HI_FREQ_BF_3S
+	0,                               			// EEP_EVT_IR530_HI_TIME_BF_3S,			// 40194 (193)	// EEP_EVT_IR530_HI_TIME_BF_3S
+	0,                               			// EEP_EVT_IR530_HI_PEAK_BF_3S,			// 40195 (194)	// EEP_EVT_IR530_HI_PEAK_BF_3S
+	0,                               			// EEP_EVT_IR530_HI_AVRG_BF_3S,			// 40196 (195)	// EEP_EVT_IR530_HI_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR530_1S_AVRG_BF_3S,			// 40197 (196)	// EEP_EVT_IR530_1S_AVRG_BF_3S
+	0,                               			// EEP_EVT_IR530_1S_PTOP_BF_3S,			// 40198 (197)	// EEP_EVT_IR530_1S_PTOP_BF_3S
+	0,                               			// EEP_EVT_IR530_AV_PTOP_BF_3S,			// 40199 (198)	// EEP_EVT_IR530_AV_PTOP_BF_3S
+	0,                               			// EEP_EVT_IR530_IR_SIZE_BF_3S,			// 40200 (199)	// EEP_EVT_IR530_IR_SIZE_BF_3S
+	0,                               			// EEP_EVT_IR530_LO_FREQ_BF_2S,			// 40201 (200)	// EEP_EVT_IR530_LO_FREQ_BF_2S
+	0,                               			// EEP_EVT_IR530_LO_TIME_BF_2S,			// 40202 (201)	// EEP_EVT_IR530_LO_TIME_BF_2S
+	0,                               			// EEP_EVT_IR530_LO_PEAK_BF_2S,			// 40203 (202)	// EEP_EVT_IR530_LO_PEAK_BF_2S
+	0,                               			// EEP_EVT_IR530_LO_AVRG_BF_2S,			// 40204 (203)	// EEP_EVT_IR530_LO_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR530_HI_FREQ_BF_2S,			// 40205 (204)	// EEP_EVT_IR530_HI_FREQ_BF_2S
+	0,                               			// EEP_EVT_IR530_HI_TIME_BF_2S,			// 40206 (205)	// EEP_EVT_IR530_HI_TIME_BF_2S
+	0,                               			// EEP_EVT_IR530_HI_PEAK_BF_2S,			// 40207 (206)	// EEP_EVT_IR530_HI_PEAK_BF_2S
+	0,                               			// EEP_EVT_IR530_HI_AVRG_BF_2S,			// 40208 (207)	// EEP_EVT_IR530_HI_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR530_1S_AVRG_BF_2S,			// 40209 (208)	// EEP_EVT_IR530_1S_AVRG_BF_2S
+	0,                               			// EEP_EVT_IR530_1S_PTOP_BF_2S,			// 40210 (209)	// EEP_EVT_IR530_1S_PTOP_BF_2S
+	0,                               			// EEP_EVT_IR530_AV_PTOP_BF_2S,			// 40211 (210)	// EEP_EVT_IR530_AV_PTOP_BF_2S
+	0,                               			// EEP_EVT_IR530_IR_SIZE_BF_2S,			// 40212 (211)	// EEP_EVT_IR530_IR_SIZE_BF_2S
+	0,                               			// EEP_EVT_IR530_LO_FREQ_BF_1S,			// 40213 (212)	// EEP_EVT_IR530_LO_FREQ_BF_1S
+	0,                               			// EEP_EVT_IR530_LO_TIME_BF_1S,			// 40214 (213)	// EEP_EVT_IR530_LO_TIME_BF_1S
+	0,                               			// EEP_EVT_IR530_LO_PEAK_BF_1S,			// 40215 (214)	// EEP_EVT_IR530_LO_PEAK_BF_1S
+	0,                               			// EEP_EVT_IR530_LO_AVRG_BF_1S,			// 40216 (215)	// EEP_EVT_IR530_LO_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR530_HI_FREQ_BF_1S,			// 40217 (216)	// EEP_EVT_IR530_HI_FREQ_BF_1S
+	0,                               			// EEP_EVT_IR530_HI_TIME_BF_1S,			// 40218 (217)	// EEP_EVT_IR530_HI_TIME_BF_1S
+	0,                               			// EEP_EVT_IR530_HI_PEAK_BF_1S,			// 40219 (218)	// EEP_EVT_IR530_HI_PEAK_BF_1S
+	0,                               			// EEP_EVT_IR530_HI_AVRG_BF_1S,			// 40220 (219)	// EEP_EVT_IR530_HI_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR530_1S_AVRG_BF_1S,			// 40221 (220)	// EEP_EVT_IR530_1S_AVRG_BF_1S
+	0,                               			// EEP_EVT_IR530_1S_PTOP_BF_1S,			// 40222 (221)	// EEP_EVT_IR530_1S_PTOP_BF_1S
+	0,                               			// EEP_EVT_IR530_AV_PTOP_BF_1S,			// 40223 (222)	// EEP_EVT_IR530_AV_PTOP_BF_1S
+	0,                               			// EEP_EVT_IR530_IR_SIZE_BF_1S,			// 40224 (223)	// EEP_EVT_IR530_IR_SIZE_BF_1S
+	0,                               			// EEP_EVT_CPS_RAW_BF_3S,			// 40235 (234)	// EEP_EVT_CPS_RAW_BF_3S
+	0,                               			// EEP_EVT_CPS_RES_BF_3S,			// 40236 (235)	// EEP_EVT_CPS_RES_BF_3S
+	0,                               			// EEP_EVT_CPS_RAW_BF_2S,			// 40237 (236)	// EEP_EVT_CPS_RAW_BF_2S
+	0,                               			// EEP_EVT_CPS_RES_BF_2S,			// 40238 (237)	// EEP_EVT_CPS_RES_BF_2S
+	0,                               			// EEP_EVT_CPS_RAW_BF_1S,			// 40239 (238)	// EEP_EVT_CPS_RAW_BF_1S
+	0,							// EEP_EVT_CPS_RES_BF_1S,			// 40240 (239)	// EEP_EVT_CPS_RES_BF_1S
+	0,                               			// EEP_EVT_IR430_DRIFT_T_MAX_L,			// 40111 (110)	// EEP_EVT_IR430_DRIFT_T_MAX_L
+	0,                               			// EEP_EVT_IR395_DRIFT_T_MAX_L,			// 40112 (111)	// EEP_EVT_IR430_DRIFT_T_MAX_H
+	0,                               			// EEP_EVT_IR530_DRIFT_T_MAX_L,			// 40113 (112)	// EEP_EVT_IR395_DRIFT_T_MAX_L
+	0,                               			// EEP_EVT_IR430_DRIFT_T_MAX_H,			// 40114 (113)	// EEP_EVT_IR395_DRIFT_T_MAX_H
+	0,                               			// EEP_EVT_IR395_DRIFT_T_MAX_H,			// 40115 (114)	// EEP_EVT_IR530_DRIFT_T_MAX_L
+	0                               			// EEP_EVT_IR530_DRIFT_T_MAX_H,			// 40116 (115)	// EEP_EVT_IR530_DRIFT_T_MAX_H
+};
+
+void Initialize_System(void)
+{
+	mmi_mode = FMODE_WARM_UP;
+	
+	det_input_reg_data_old = 0xff;
+	
+	bit_operation = Det_Holding_Reg_Data[DET_EEP_BIT_MODE];
+	
+	Initialize_ModeFlag();
+}
+
+void Initialize_ModeFlag(void)
+{
+	memset( ModeSetFlow, 0, sizeof(ModeSetFlow) );
+	memset( ModeSetFlag, 0, sizeof(ModeSetFlag) );
+	
+	ModeSetTime[FMODE_DET_MA_CAL_SET] = 1000;
+	ModeSetTime[FMODE_DET_TEST_MODE] = 1000;
+	ModeSetTime[FMODE_RESET_COMFIRM] = 1000;
+	ModeSetTime[FMODE_DET_EEP_CLEAR_MODE] = 1000;
+}
+
+void LCD_Operating(void)
+{
+	if( (Det_Modbus_Buf[Det_Write_Err_Flag] == 3) && (Det_Analog_Data < 100) ){
+		mmi_mode = FMODE_NOT_CONNECTOR;
+		if(ModeSetFlow[FMODE_NOT_CONNECTOR] == 0){
+			ModeSetFlow[FMODE_NOT_CONNECTOR] = 1;
+		}
+	}
+	else{
+		if(ModeSetFlow[FMODE_NOT_CONNECTOR] > 0){
+			ModeSetFlow[FMODE_NOT_CONNECTOR] = 0;
+			mmi_mode = FMODE_NORMAL;
+			LCD_Clear_Line_All();
+		}
+	}
+	
+	switch(mmi_mode){
+		case FMODE_WARM_UP:
+			Func_Warm_Up();
+			break;
+		case FMODE_NORMAL:
+			Func_Normal();
+			break;
+		case FMODE_CONFIGIURATION:
+			Func_Configration();
+			break;
+		case FMODE_ADDRESS_SET:
+			Func_Address_Set();
+			break;
+		case FMODE_DET_MA_CAL_SET:
+			Func_Det_mA_Cal_Set();
+			break;
+		case FMODE_DEV_MA_CAL_SET:
+			Func_Dev_mA_Cal_Set();
+			break;
+		case FMODE_DET_RELAY_SET:
+			Func_Det_Relay_Set();
+			break;
+		case FMODE_DET_IR_RESPONSIVITY_SET:
+			Func_Det_IR_Responsivity_Set();
+			break;
+		case FMODE_DET_EEP_CLEAR_MODE:
+			Func_Det_Eep_Clear_Mode();
+			break;
+		case FMODE_DET_TEST_MODE:
+			Func_Det_Test_Mode();
+			break;
+		case FMODE_NOT_CONNECTOR:
+			Fnuc_Not_Connector();
+			break;
+		//case FMODE_RESET_COMFIRM:
+		//	Func_Reset_Confirm();
+		//	break;
+	}
+	if(mmi_mode != mmi_mode_old){
+		LCD_Clear_Line_All();
+	}
+
+	mmi_mode_old = mmi_mode;
+}
+
+void Func_Warm_Up(void)
+{
+	sprintf(lcd1_buf,"GTFJ-1000F");
+	LCD_Display(LCDADD_LINE1_3, lcd1_buf);
+	sprintf(lcd2_buf,"Ver %d.%02d",_FW_VERSION_MA, _FW_VERSION_MI);
+	LCD_Display(LCDADD_LINE2_4, lcd2_buf);
+	sprintf(lcd3_buf,"[ %02d ]", sTimerTick[TMR_SELFTEST]);
+	LCD_Display(LCDADD_LINE3_5, lcd3_buf);
+	
+	if(sTimerTick[TMR_SELFTEST] == 0)
+	{
+		LCD_Clear_Line_All();
+		mmi_mode = FMODE_NORMAL;
+	}
+}
+
+void Func_Normal(void)
+{
+U8	reg_data;
+
+	if( Det_Modbus_Buf[Det_Write_Err_Flag] == 3 ){
+		reg_data = ALARM_STATE_MODBUS_FAULT;
+		Det_Reg_Clear();
+	}
+	else if(Det_Modbus_Buf[Det_Write_Err_Flag] == 1){
+		reg_data = ALARM_WRITE_SINGLE_COMM_SUC;
+	}
+	else if(Det_Modbus_Buf[Det_Write_Err_Flag] == 2){
+		reg_data = ALARM_WRITE_SINGLE_COMM_ERR;
+	}
+	else{
+		reg_data = Det_Input_Reg_Data[DET_InputReg_AlarmState];
+	}
+	
+	//if(reg_data != det_input_reg_data_old){
+	if(sTimerFlag[TMR_500MS]){
+		sTimerFlag[TMR_500MS] = 0;
+		
+		if(det_input_reg_data_old != reg_data){
+			//LCD_Clear_Line_All();
+			LCD_Clear_Line(LCD_LINE1);
+		}
+		
+		if(reg_data != ALARM_STATE_MODBUS_FAULT)
+		{
+			if(Det_Input_Reg_Data[DET_InputReg_DeviceType] == STATUS_UVIR)
+			{
+				sprintf(lcd1_buf,"U");
+				//DPRINT("1100U\n");
+			}
+			else
+			{
+				sprintf(lcd1_buf,"T");
+				//DPRINT("1100T\n");
+			}
+			LCD_Display(LCDADD_LINE1_0, lcd1_buf);
+		}
+		
+		switch(reg_data)
+		{
+			case ALARM_STATE_NO:
+				sprintf(lcd1_buf,"Normal");
+				break;
+			case ALARM_STATE_BIT_PROGRESS:
+				sprintf(lcd1_buf,"BIT Progress");
+				break;
+			case ALARM_STATE_WARNING:
+				sprintf(lcd1_buf,"Warning");
+				break;
+			case ALARM_STATE_IR:
+				sprintf(lcd1_buf,"IR Detect");
+				break;
+			case ALARM_STATE_UV:
+				sprintf(lcd1_buf,"UV Detect");
+				break;
+			case ALARM_STATE_FLAME:
+				sprintf(lcd1_buf,"Flame Detect");
+				break;
+			case ALARM_STATE_PWR_FAULT:
+				sprintf(lcd1_buf,"Power Fault");
+				break;
+			case ALARM_STATE_BIT_FAULT:
+				sprintf(lcd1_buf,"BIT Fault");
+				break;
+			case ALARM_STATE_IR_OFFSET_FAULT:
+				sprintf(lcd1_buf,"IR Offset Fault");
+				break;
+			case ALARM_STATE_EEP_FAULT:
+				sprintf(lcd1_buf,"EEP Fault");
+				break;
+			case ALARM_STATE_MODBUS_FAULT:
+				sprintf(lcd1_buf,"MODBUS Fault!");
+				break;
+			case ALARM_WRITE_SINGLE_COMM_SUC:
+				sprintf(lcd1_buf,"Write Success!");
+				break;
+			case ALARM_WRITE_SINGLE_COMM_ERR:
+				sprintf(lcd1_buf,"Write Fail!");
+				break;
+		}
+		det_input_reg_data_old = reg_data;
+		LCD_Display(LCDADD_LINE1_2, lcd1_buf);
+
+		//DPRINT1("Ver = V0.%02d\n", Det_Input_Reg_Data[0]);
+		sprintf(lcd2_buf,"V0.%02d%d", Det_Input_Reg_Data[DET_InputReg_FW_VERSION], Det_Input_Reg_Data[DET_InputReg_FW_VERSION_RE]);
+		LCD_Display(LCDADD_LINE2_0, lcd2_buf);
+		
+		sprintf(lcd3_buf,"P%02d.%d", (Det_Input_Reg_Data[DET_InputReg_P24] / 10), (Det_Input_Reg_Data[DET_InputReg_P24] % 10));
+		LCD_Display(LCDADD_LINE3_0, lcd3_buf);
+		
+		sprintf(lcd4_buf,"T%02d.%d", (Det_Input_Reg_Data[DET_InputReg_Tempareture] / 10), (Det_Input_Reg_Data[DET_InputReg_Tempareture] % 10));
+		LCD_Display(LCDADD_LINE4_0, lcd4_buf);
+		
+		if(alm_relay_chk)
+		{
+			sprintf(lcd2_buf,"AR:O");
+		}
+		else
+		{
+			sprintf(lcd2_buf,"AR:X");
+		}
+		LCD_Display(LCDADD_LINE2_7, lcd2_buf);
+		
+		if(trb_relay_chk)
+		{
+			sprintf(lcd2_buf,"TR:O");
+		}
+		else
+		{
+			sprintf(lcd2_buf,"TR:X");
+		}
+		LCD_Display(LCDADD_LINE2_12, lcd2_buf);
+		
+		//DPRINT1("Det_Analog_Data = %d\n",Det_Analog_Data);
+		sprintf(lcd3_buf,"mA: %02d.%02d", (Det_Analog_Data / 100), (Det_Analog_Data % 100));
+		LCD_Display(LCDADD_LINE3_7, lcd3_buf);
+		
+		if(reg_data == ALARM_STATE_MODBUS_FAULT){
+			sprintf(lcd4_buf,"BIT:      ");
+		}
+		else{
+			bit_operation = Det_Holding_Reg_Data[DET_EEP_BIT_MODE];
+			if(bit_operation){
+				sprintf(lcd4_buf,"BIT:AUTO  ");
+			}
+			else{
+				sprintf(lcd4_buf,"BIT:MANUAL");
+			}
+		}
+		LCD_Display(LCDADD_LINE4_7, lcd4_buf);
+	}
+}
+
+void Func_Configration(void)
+{
+	LCD_Display_Select_Cursor();
+		
+	sprintf(lcd1_buf,"1.Det Relay Set");
+	LCD_Display(LCDADD_LINE1_1, lcd1_buf);
+
+	sprintf(lcd2_buf,"2.IR Respons");
+	LCD_Display(LCDADD_LINE2_1, lcd2_buf);
+
+	sprintf(lcd3_buf,"3.Address Set");
+	LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+
+	sprintf(lcd4_buf,"4.Dev mA Cal");
+	LCD_Display(LCDADD_LINE4_1, lcd4_buf);
+}
+
+void Func_Address_Set(void)
+{
+	LCD_Display_Select_Cursor();
+		
+	if(key_func_select_flag){
+		if(sTimerFlag[TMR_250MS]){
+			sprintf(lcd1_buf,"1. Det Add[%03d]", Det_Address);
+			sprintf(lcd2_buf,"2. Dev Add[%03d]", Dvc_Address);
+		}
+		else{
+			if(setting_mode_cursor == line_1){
+				sprintf(lcd1_buf,"1. Det Add[   ]");
+				sprintf(lcd2_buf,"2. Dev Add[%03d]", Dvc_Address);
+			}
+			else if(setting_mode_cursor == line_2){
+				sprintf(lcd2_buf,"2. Dev Add[   ]");
+				sprintf(lcd1_buf,"1. Det Add[%03d]", Det_Address);
+			}
+		}
+	}
+	else{
+		sprintf(lcd1_buf,"1. Det Add[%03d]", Det_Address);
+		sprintf(lcd2_buf,"2. Dev Add[%03d]", Dvc_Address);
+	}
+	LCD_Display(LCDADD_LINE1_1, lcd1_buf);
+	LCD_Display(LCDADD_LINE2_1, lcd2_buf);
+}
+
+void Func_Det_mA_Cal_Set(void)
+{
+S16	ma_gap;
+
+	sprintf(lcd1_buf,"[Det mA Cal]");
+	LCD_Display(LCDADD_LINE1_2, lcd1_buf);
+	
+	if(ModeSetFlag[FMODE_DET_MA_CAL_SET]){
+		ModeSetFlag[FMODE_DET_MA_CAL_SET] = 0;
+		
+		switch(ModeSetFlow[FMODE_DET_MA_CAL_SET]){
+			case 1:
+				if(Det_Holding_Reg_Data[DET_EEP_CALIBRATION_MODE] > 0){
+					Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,0);
+				}
+				ModeSetFlow[FMODE_DET_MA_CAL_SET] = 2;
+				break;
+			case 2:
+				sTimerFlag[TMR_NORMAL_RETURN] = 0;
+				sprintf(lcd2_buf,"04mA Cal Progress..");
+				LCD_Display(LCDADD_LINE2_0, lcd2_buf);
+				
+				//ma_gap = (Det_Holding_Reg_Data[DET_EEP_ANALOG_04MA] / 10 ) - Det_Analog_Data;
+				ma_gap = 400 - Det_Analog_Data;
+				//DPRINT3("mA_gap = %05d, %05d, %05d, ", ma_gap, abs(ma_gap), Det_Analog_Data);
+				//DPRINT1("Det_Holding_Reg_Data = %05d, ", Det_Holding_Reg_Data[DET_EEP_ANALOG_04MA]);
+				
+				if( abs(ma_gap) > 10 ){
+					if(ma_gap > 0){
+						Det_Write_Single_Func(DET_EEP_ANALOG_04MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_04MA] + 100);
+						DPRINT1("04mA 10 UP = %05d\n", (Det_Analog_Data + 10) * 10);
+						
+					}
+					else{
+						Det_Write_Single_Func(DET_EEP_ANALOG_04MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_04MA] - 100);
+						DPRINT1("04mA 10 DW = %05d\n", (Det_Analog_Data - 10) * 10);
+					}
+				}
+				else if( abs(ma_gap) > 3 ){
+					if(ma_gap > 0){
+						Det_Write_Single_Func(DET_EEP_ANALOG_04MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_04MA] + 10);
+						DPRINT1("04mA 1 UP = %05d\n", (Det_Analog_Data + 1) * 10);
+					}
+					else{
+						Det_Write_Single_Func(DET_EEP_ANALOG_04MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_04MA] - 10);
+						DPRINT1("04mA 1 DW = %05d\n", (Det_Analog_Data - 1) * 10);
+					}
+				}
+				else{
+					ModeSetFlow[FMODE_DET_MA_CAL_SET] = 3;
+					DPRINT("4mA Cal OK\n");
+					
+					sprintf(lcd2_buf,"04mA Cal Success");
+					LCD_Display(LCDADD_LINE2_0, lcd2_buf);
+				}
+				break;
+			case 3:
+				ModeSetFlow[FMODE_DET_MA_CAL_SET] = 4;
+				Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,2);
+				break;
+			case 4:
+				sprintf(lcd3_buf,"20mA Cal Progress..");
+				LCD_Display(LCDADD_LINE3_0, lcd3_buf);
+				
+				ma_gap = 2000 - Det_Analog_Data;
+				//DPRINT3("mA_gap = %05d, %05d, %05d, ", ma_gap, abs(ma_gap), Det_Analog_Data);
+				//DPRINT1("Det_Holding_Reg_Data = %05d, ", Det_Holding_Reg_Data[DET_EEP_ANALOG_20MA]);
+				
+				if( abs(ma_gap) > 10 ){
+					if(ma_gap > 0){
+						Det_Write_Single_Func(DET_EEP_ANALOG_20MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_20MA] + 100);
+						DPRINT1("20mA 10 UP = %05d\n", (Det_Analog_Data + 10) * 10);
+						
+					}
+					else{
+						Det_Write_Single_Func(DET_EEP_ANALOG_20MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_20MA] - 100);
+						DPRINT1("20mA 10 DW = %05d\n", (Det_Analog_Data - 10) * 10);
+					}
+				}
+				else if( abs(ma_gap) > 3 ){
+					if(ma_gap > 0){
+						Det_Write_Single_Func(DET_EEP_ANALOG_20MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_20MA] + 10);
+						DPRINT1("20mA 1 UP = %05d\n", (Det_Analog_Data + 1) * 10);
+					}
+					else{
+						Det_Write_Single_Func(DET_EEP_ANALOG_20MA, Det_Holding_Reg_Data[DET_EEP_ANALOG_20MA] - 10);
+						DPRINT1("20mA 1 DW = %05d\n", (Det_Analog_Data - 1) * 10);
+					}
+				}
+				else{
+					ModeSetFlow[FMODE_DET_MA_CAL_SET] = 5;
+					//DPRINT("20mA Cal OK\n");
+					
+					sprintf(lcd3_buf,"20mA Cal Success");
+					LCD_Display(LCDADD_LINE3_0, lcd3_buf);
+				}
+				break;
+			case 5:
+				Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,0);
+				ModeSetFlow[FMODE_DET_MA_CAL_SET] = 6;
+				//sTimerFlag[TMR_NORMAL_RETURN] = 1;
+				//sTimerTick[TMR_NORMAL_RETURN] = NORMAL_RETURN_CNT;
+				break;
+			case 6:
+				ModeSetFlow[FMODE_DET_MA_CAL_SET] = 0;
+				LCD_Clear_Line_All();
+				mmi_mode = FMODE_DET_TEST_MODE;
+				ModeSetFlow[FMODE_DET_TEST_MODE] = 1;
+				break;
+		}
+	}
+}
+
+void Func_Dev_mA_Cal_Set(void)
+{
+	sprintf(lcd1_buf,"[mA Calibration]");
+	LCD_Display(LCDADD_LINE1_0, lcd1_buf);
+	
+	switch(key_func_select_flag){
+		case 0:
+			sprintf(lcd2_buf,"04mA : [ %04.0f ]", fADBuf[0]);
+			LCD_Display(LCDADD_LINE2_1, lcd2_buf);
+			break;
+		case 1:
+			sprintf(lcd3_buf,"20mA : [ %04.0f ]", fADBuf[0]);
+			LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+			break;
+		case 2:	
+			sprintf(lcd4_buf,"[ Complete ]");
+			LCD_Display(LCDADD_LINE4_2, lcd4_buf);
+			break;
+	}
+}
+
+void Func_Det_Relay_Set(void)
+{
+	LCD_Display_Select_Cursor();
+
+	//sprintf(lcd1_buf,"[Relay Setting]");
+	//LCD_Display(LCDADD_LINE1_0, lcd1_buf);
+	
+	if(key_func_select_flag){
+		if(sTimerFlag[TMR_250MS]){
+			if(alm_relay_operation == 1){
+				sprintf(lcd1_buf,"1. ALM [ENG   ]");
+			}
+			else{
+				sprintf(lcd1_buf,"1. ALM [DE-ENG]");
+			}
+			if(trb_relay_operation == 1){
+				sprintf(lcd2_buf,"2. TRB [ENG   ]");
+			}
+			else{
+				sprintf(lcd2_buf,"2. TRB [DE-ENG]");
+			}
+		}
+		else{
+			if(setting_mode_cursor == line_1){
+				sprintf(lcd1_buf,"1. ALM [      ]");
+				
+				if(trb_relay_operation == 1){
+					sprintf(lcd2_buf,"2. TRB [ENG   ]");
+				}
+				else{
+					sprintf(lcd2_buf,"2. TRB [DE-ENG]");
+				}
+			}
+			else if(setting_mode_cursor == line_2){
+				sprintf(lcd2_buf,"2. TRB [      ]");
+				
+				if(alm_relay_operation == 1){
+					sprintf(lcd1_buf,"1. ALM [ENG   ]");
+				}
+				else{
+					sprintf(lcd1_buf,"1. ALM [DE-ENG]");
+				}
+			}
+		}
+	}
+	else{
+		if(alm_relay_operation == 1){
+			sprintf(lcd1_buf,"1. ALM [ENG   ]");
+		}
+		else{
+			sprintf(lcd1_buf,"1. ALM [DE-ENG]");
+		}
+		if(trb_relay_operation == 1){
+			sprintf(lcd2_buf,"2. TRB [ENG   ]");
+		}
+		else{
+			sprintf(lcd2_buf,"2. TRB [DE-ENG]");
+		}
+	}
+	LCD_Display(LCDADD_LINE1_1, lcd1_buf);
+	LCD_Display(LCDADD_LINE2_1, lcd2_buf);
+}
+
+void Func_Det_IR_Responsivity_Set(void)
+{
+	LCD_Display_Select_Cursor();
+
+	//sprintf(lcd1_buf,"[Relay Setting]");
+	//LCD_Display(LCDADD_LINE1_0, lcd1_buf);
+	
+	if(key_func_select_flag){
+		if(sTimerFlag[TMR_250MS]){
+			sprintf(lcd1_buf,"1.4.66um[%04d]", det_ir_reponsivity_466);
+			sprintf(lcd2_buf,"2.3.95um[%04d]", det_ir_reponsivity_466);
+			sprintf(lcd3_buf,"3.5.30um[%04d]", det_ir_reponsivity_466);
+		}
+		else{
+			switch(setting_mode_cursor){
+				case line_1:
+					sprintf(lcd1_buf,"1.4.66um[    ]");
+					sprintf(lcd2_buf,"2.3.95um[%04d]", det_ir_reponsivity_466);
+					sprintf(lcd3_buf,"3.5.30um[%04d]", det_ir_reponsivity_466);
+					break;
+				case line_2:
+					sprintf(lcd2_buf,"2.3.95um[    ]");
+					sprintf(lcd1_buf,"1.4.66um[%04d]", det_ir_reponsivity_466);
+					sprintf(lcd3_buf,"3.5.30um[%04d]", det_ir_reponsivity_466);
+					break;
+				case line_3:
+					sprintf(lcd3_buf,"3.5.30um[    ]");
+					sprintf(lcd1_buf,"1.4.66um[%04d]", det_ir_reponsivity_466);
+					sprintf(lcd2_buf,"2.3.95um[%04d]", det_ir_reponsivity_466);
+					break;
+			}
+		}
+	}
+	else{
+		sprintf(lcd1_buf,"1.4.66um[%04d]", det_ir_reponsivity_466);
+		sprintf(lcd2_buf,"2.3.95um[%04d]", det_ir_reponsivity_466);
+		sprintf(lcd3_buf,"3.5.30um[%04d]", det_ir_reponsivity_466);
+	}
+	LCD_Display(LCDADD_LINE1_1, lcd1_buf);
+	LCD_Display(LCDADD_LINE2_1, lcd2_buf);
+	LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+}
+
+void Func_Det_Eep_Clear_Mode(void)
+{
+U8	i;
+U8	cnt = 0;
+U16	s_addr, e_addr;
+
+	sprintf(lcd1_buf,"[DET Clear Mode]");
+	LCD_Display(LCDADD_LINE1_0, lcd1_buf);
+
+	switch(ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE]){
+		case 1:
+			LCD_Display_Select_Cursor();
+			
+			sprintf(lcd2_buf,"Event Log");
+			LCD_Display(LCDADD_LINE2_1, lcd2_buf);
+			sprintf(lcd3_buf,"Calibration");
+			LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+			sprintf(lcd4_buf,"Factory Reset");
+			LCD_Display(LCDADD_LINE4_1, lcd4_buf);
+			break;
+		case 2:
+			sprintf(lcd3_buf,"Progress.   ");
+			LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+			break;
+		case 3:
+			sprintf(lcd3_buf,"Progress..   ");
+			LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+			break;
+		case 4:
+			switch(ModeSetFlag[FMODE_DET_EEP_CLEAR_MODE]){
+				case 1:
+					s_addr = DET_EEP_EVT_BIT_IR430_1S_PTOP_MIN;
+					e_addr = DET_EEP_MAX;
+					break;
+				case 2:
+					s_addr = DET_EEP_ANALOG_04MA;
+					e_addr = DET_EEP_EVT_BIT_IR430_1S_PTOP_MIN;
+					break;
+				case 3:
+					s_addr = DET_EEP_ANALOG_04MA;
+					e_addr = DET_EEP_MAX;
+					break;
+			}
+
+			for(i = s_addr; i < e_addr;i++){
+				if(Det_Holding_Reg_Data[i] == pgm_read_word( &DET_EEP_SYS_DEFAULT[i] )){
+					cnt++;
+					//DPRINT2("s %d, %d\n", Det_Holding_Reg_Data[i], pgm_read_word( &DET_EEP_SYS_DEFAULT[i] ) );
+				}
+				else{
+					//DPRINT2("f %d, %d\n", Det_Holding_Reg_Data[i], pgm_read_word( &DET_EEP_SYS_DEFAULT[i] ) );
+				}
+			}
+			
+			if(cnt == (e_addr - s_addr) ){
+				DPRINT2("success %d, %d\n", (e_addr - s_addr), cnt);
+				ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE] = 5;
+			}
+			else{
+				DPRINT2("fail %d, %d\n", (e_addr - s_addr), cnt);
+				ModeSetFlow[FMODE_DET_EEP_CLEAR_MODE] = 6;
+			}
+			break;
+		case 5:
+			sprintf(lcd3_buf,"Clear Success");
+			LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+			//sTimerFlag[TMR_NORMAL_RETURN] = 1;
+			
+			Initialize_ModeFlag();
+			break;
+		case 6:
+			sprintf(lcd3_buf,"Clear Fail...");
+			LCD_Display(LCDADD_LINE3_1, lcd3_buf);
+			sTimerFlag[TMR_NORMAL_RETURN] = 0;
+			
+			Initialize_ModeFlag();
+			break;
+	}
+}
+
+void Func_Det_Test_Mode(void)
+{
+U8	bFlag = ALARM_STATE_NO;
+
+	sprintf(lcd1_buf,"[ DET AutoTest ]");
+	LCD_Display(LCDADD_LINE1_0, lcd1_buf);
+	
+	if(ModeSetFlag[FMODE_DET_TEST_MODE]){
+		ModeSetFlag[FMODE_DET_TEST_MODE] = 0;
+		
+		switch(ModeSetFlow[FMODE_DET_TEST_MODE]){
+			case 1:
+				det_status_data_arry[det_status_data_old][alm_relay_data] = alm_relay_chk;
+				det_status_data_arry[det_status_data_old][trb_relay_data] = trb_relay_chk;
+				det_status_data_arry[det_status_data_old][analog_data] = Det_Analog_Data;
+				TP10_AIC_H();
+				Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,1);
+				ModeSetFlow[FMODE_DET_TEST_MODE] = 2;
+				//sTimerFlag[TMR_NORMAL_RETURN] = 0;
+				break;
+			case 2:
+				ModeSetFlow[FMODE_DET_TEST_MODE] = 3;
+				break;
+			case 3:
+				det_status_data_arry[det_status_data_new][alm_relay_data] = alm_relay_chk;
+				det_status_data_arry[det_status_data_new][trb_relay_data] = trb_relay_chk;
+				det_status_data_arry[det_status_data_new][analog_data] = Det_Analog_Data;
+
+				sprintf(lcd2_buf,"ALM:");
+				LCD_Display(LCDADD_LINE2_2, lcd2_buf);
+				
+				sprintf(lcd2_buf,"TRB:");
+				LCD_Display(LCDADD_LINE2_9, lcd2_buf);
+				
+				sprintf(lcd3_buf,"mA :");
+				LCD_Display(LCDADD_LINE3_2, lcd3_buf);
+				
+				sprintf(lcd3_buf,"BIT:");
+				LCD_Display(LCDADD_LINE3_9, lcd3_buf);
+
+				if(det_status_data_arry[det_status_data_old][alm_relay_data] != det_status_data_arry[det_status_data_new][alm_relay_data]){
+					sprintf(lcd2_buf,"O");
+				}
+				else{
+					sprintf(lcd2_buf,"X");
+					bFlag |= 0x01;
+				}
+				LCD_Display(LCDADD_LINE2_6, lcd2_buf);
+				
+				if(det_status_data_arry[det_status_data_old][trb_relay_data] != det_status_data_arry[det_status_data_new][trb_relay_data]){
+					sprintf(lcd2_buf,"O");
+				}
+				else{
+					sprintf(lcd2_buf,"X");
+					bFlag |= 0x02;
+				}
+				LCD_Display(LCDADD_LINE2_13, lcd2_buf);
+				
+				if(det_status_data_arry[det_status_data_new][analog_data] > 1960){
+					DPRINT1("ad new good= %d\n", det_status_data_arry[det_status_data_new][analog_data]);
+					sprintf(lcd3_buf,"O");
+				}
+				else{
+					DPRINT1("ad new fail= %d\n", det_status_data_arry[det_status_data_new][analog_data]);
+					sprintf(lcd3_buf,"X");
+					bFlag |= 0x04;
+				}
+				LCD_Display(LCDADD_LINE3_6, lcd3_buf);
+				
+				if(Det_Input_Reg_Data[DET_InputReg_AlarmState] == ALARM_STATE_BIT_PROGRESS){
+					sprintf(lcd3_buf,"O");
+				}
+				else{
+					sprintf(lcd3_buf,"X");
+					bFlag |= 0x08;
+				}
+				LCD_Display(LCDADD_LINE3_13, lcd3_buf);
+				
+				
+				if(bFlag != 0x00){
+					sprintf(lcd4_buf,"[   Fail   ]");
+					sTimerFlag[TMR_NORMAL_RETURN] = 0;
+				}
+				else{
+					sprintf(lcd4_buf,"[ Complete ]");
+					sTimerFlag[TMR_NORMAL_RETURN] = 1;
+				}
+				LCD_Display(LCDADD_LINE4_2, lcd4_buf);
+				Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,0);
+				
+				TP10_AIC_L();
+				
+				ModeSetFlow[FMODE_DET_TEST_MODE] = 0;
+				break;
+		}
+	}
+}
+
+void Fnuc_Not_Connector(void)
+{
+	switch(ModeSetFlow[FMODE_NOT_CONNECTOR] ){
+		case 1:
+			LCD_Clear_Line_All();
+			ModeSetFlow[FMODE_NOT_CONNECTOR] = 2;
+			break;
+		case 2:
+			sprintf(lcd2_buf,"[   Detector   ]");
+			LCD_Display(LCDADD_LINE2_0, lcd2_buf);
+			sprintf(lcd3_buf,"[Not Connected!]");
+			LCD_Display(LCDADD_LINE3_0, lcd3_buf);
+			break;
+	}
+}
+
+
+void Func_Reset_Confirm(U8 mode)
+{
+	if(ModeSetFlag[FMODE_RESET_COMFIRM]){
+		ModeSetFlag[FMODE_RESET_COMFIRM] = 0;
+		
+		switch(ModeSetFlow[FMODE_RESET_COMFIRM]){
+			case 1:
+				if(mmi_mode == FMODE_DET_MA_CAL_SET){
+					ModeSetFlow[FMODE_DET_MA_CAL_SET] = 0;
+				}
+				LCD_Clear_Line_All();
+				ModeSetFlow[FMODE_RESET_COMFIRM] = 2;
+				break;
+			case 2:
+				if(mmi_mode == FMODE_DET_MA_CAL_SET){
+					Det_Write_Single_Func(DET_EEP_CALIBRATION_MODE,0);
+				}
+				
+				sprintf(lcd2_buf,"Reset!!!");
+				LCD_Display(LCDADD_LINE2_4, lcd2_buf);
+				ModeSetFlow[FMODE_RESET_COMFIRM] = 3;
+				break;
+			case 3:
+				sTimerFlag[TMR_NORMAL_RETURN] = 1;
+				sTimerTick[TMR_NORMAL_RETURN] = NORMAL_RETURN_CNT;
+				KeyData = 0xff;
+				Initialize_ModeFlag();
+				break;
+		}
+	}
+}
